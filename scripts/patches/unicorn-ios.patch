@@ -31,7 +31,7 @@
  {                                                   \
 --- a/qemu/accel/tcg/translate-all.c
 +++ b/qemu/accel/tcg/translate-all.c
-@@ -1019,14 +1019,40 @@
+@@ -1019,14 +1019,39 @@
 +#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
 +static int ipatool_jit_mode = 0; /* 1=MAP_JIT, 2=RWX, 3=W^X mprotect */
 +#endif
@@ -71,7 +71,7 @@
      if (buf == MAP_FAILED) {
          return NULL;
      }
-@@ -2172,7 +2198,40 @@
+@@ -2172,7 +2197,40 @@
  }
  
  
