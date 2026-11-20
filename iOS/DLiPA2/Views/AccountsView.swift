@@ -4,10 +4,38 @@ struct AccountsView: View {
     @EnvironmentObject private var service: IPAToolService
     @State private var showAddSheet = false
     @State private var errorAlert: String?
+    @State private var jitEnabled = JITHelper.isJITEnabled()
 
     var body: some View {
         NavigationView {
             List {
+                Section("Trạng thái JIT (Unicorn SAP)") {
+                    HStack {
+                        Image(systemName: jitEnabled ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(jitEnabled ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(jitEnabled ? "JIT đang bật (CS_DEBUGGED)" : "JIT chưa được bật")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex())")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            jitEnabled = JITHelper.isJITEnabled()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    if !jitEnabled {
+                        Text("Hãy mở DLiPA2 qua StikDebug để kích hoạt JIT trước khi bấm Đăng nhập.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 if let initError = service.initError {
                     Section("Lỗi khởi tạo Core") {
                         Text(initError)
