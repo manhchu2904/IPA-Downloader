@@ -31,7 +31,7 @@ struct AccountsView: View {
                         .buttonStyle(.borderless)
                     }
                     if !jitEnabled {
-                        Text("Hãy mở DLiPA2 qua StikDebug để kích hoạt JIT trước khi bấm Đăng nhập.")
+                        Text("Hãy mở DLiPA2 qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

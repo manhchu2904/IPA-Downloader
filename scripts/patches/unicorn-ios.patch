@@ -31,9 +31,32 @@
  {                                                   \
 --- a/qemu/accel/tcg/translate-all.c
 +++ b/qemu/accel/tcg/translate-all.c
-@@ -1019,14 +1019,39 @@
+@@ -1019,14 +1019,68 @@
 +#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-+static volatile int ipatool_jit_mode = 0; /* 1=MAP_JIT, 2=RWX+W^X mprotect, 3=RW+W^X mprotect */
++static volatile int ipatool_jit_mode = 0; /* 1=MAP_JIT, 3=W^X mprotect, 4=JIT26 (StikDebug) */
++
++extern int csops(int pid, unsigned int ops, void *useraddr, size_t usersize);
++
++static int ipatool_is_cs_debugged(void)
++{
++    uint32_t flags = 0;
++    if (csops((int)getpid(), 0, &flags, sizeof(flags)) == 0) {
++        return (flags & 0x10000000u) != 0;
++    }
++    return 0;
++}
++
++#if defined(__aarch64__)
++__attribute__((noinline, optnone, naked))
++static void *ipatool_jit26_prepare_region(void *address, size_t length)
++{
++    __asm__ volatile(
++        "mov x16, #1\n"
++        "brk #0xf00d\n"
++        "ret\n"
++    );
++}
++#endif
 +#endif
 +
  static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
@@ -49,18 +72,24 @@
 +    if (buf != MAP_FAILED) {
 +        __atomic_store_n(&ipatool_jit_mode, 1, __ATOMIC_RELEASE);
 +        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=1 (MAP_JIT) buf=%p size=%zu\n", buf, size);
-+    } else {
++    } else if (ipatool_is_cs_debugged()) {
++#if defined(__aarch64__)
 +        buf = mmap(NULL, size, PROT_WRITE | PROT_READ | PROT_EXEC,
 +                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 +        if (buf != MAP_FAILED) {
-+            __atomic_store_n(&ipatool_jit_mode, 2, __ATOMIC_RELEASE);
-+            fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=2 (RWX+mprotect) buf=%p size=%zu\n", buf, size);
-+        } else {
-+            buf = mmap(NULL, size, PROT_WRITE | PROT_READ,
-+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-+            __atomic_store_n(&ipatool_jit_mode, 3, __ATOMIC_RELEASE);
-+            fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=3 (RW+mprotect) buf=%p size=%zu\n", buf, size);
++            void *prepared = ipatool_jit26_prepare_region(buf, size);
++            fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=4 (JIT26) raw=%p prepared=%p size=%zu\n", buf, prepared, size);
++            if (prepared != NULL && prepared != MAP_FAILED) {
++                buf = prepared;
++            }
++            __atomic_store_n(&ipatool_jit_mode, 4, __ATOMIC_RELEASE);
 +        }
++#endif
++    } else {
++        buf = mmap(NULL, size, PROT_WRITE | PROT_READ,
++                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        __atomic_store_n(&ipatool_jit_mode, 3, __ATOMIC_RELEASE);
++        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=3 (W^X) buf=%p size=%zu\n", buf, size);
 +    }
 +#else
  #ifdef USE_MAP_JIT
@@ -71,7 +100,7 @@
      if (buf == MAP_FAILED) {
          return NULL;
      }
-@@ -2172,7 +2197,44 @@
+@@ -2172,7 +2226,51 @@
  }
  
  
@@ -94,7 +123,8 @@
 +
 +void ipatool_jit_write_protect(struct uc_struct *uc, int enabled)
 +{
-+    if (__atomic_load_n(&ipatool_jit_mode, __ATOMIC_ACQUIRE) == 1) {
++    int mode = __atomic_load_n(&ipatool_jit_mode, __ATOMIC_ACQUIRE);
++    if (mode == 1) {
 +        pthread_once(&ipatool_jit_once, ipatool_resolve_jit_fns);
 +        if (ipatool_supported_fn && ipatool_protect_fn && ipatool_supported_fn()) {
 +            ipatool_protect_fn(enabled);
@@ -102,6 +132,12 @@
 +        return;
 +    }
 +    TCGContext *ctx = uc->tcg_ctx;
++    if (mode == 4) {
++        if (enabled && ctx && ctx->initial_buffer) {
++            sys_icache_invalidate(ctx->initial_buffer, ctx->initial_buffer_size);
++        }
++        return;
++    }
 +    if (ctx && ctx->initial_buffer) {
 +        if (mprotect(ctx->initial_buffer, ctx->initial_buffer_size,
 +                     PROT_READ | (enabled ? PROT_EXEC : PROT_WRITE)) != 0) {
