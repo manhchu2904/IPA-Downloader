@@ -1,0 +1,82 @@
+name: Build DLiPA2 iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Build configuration (Release or Debug)"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    env:
+      BUILD_CONFIG: ${{ inputs.configuration || 'Release' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Install build tools (cmake, xcodegen, gomobile)
+        run: |
+          brew install cmake xcodegen
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize gomobile
+        run: gomobile init
+
+      - name: Build libunicorn.a and Ipatoolbridge.xcframework (${{ env.BUILD_CONFIG }})
+        run: |
+          chmod +x scripts/build-xcframework.sh
+          if [ "$BUILD_CONFIG" = "Debug" ]; then
+            ./scripts/build-xcframework.sh --debug
+          else
+            ./scripts/build-xcframework.sh
+          fi
+
+      - name: Generate Xcode project
+        working-directory: iOS
+        run: xcodegen generate
+
+      - name: Build unsigned iOS app (${{ env.BUILD_CONFIG }}, arm64)
+        working-directory: iOS
+        run: |
+          xcodebuild \
+            -project DLiPA2.xcodeproj \
+            -scheme DLiPA2 \
+            -configuration "$BUILD_CONFIG" \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Package unsigned IPA
+        working-directory: iOS
+        run: |
+          mkdir -p dist/Payload
+          cp -R "build/Build/Products/${BUILD_CONFIG}-iphoneos/DLiPA2.app" dist/Payload/
+          cd dist
+          zip -r "../DLiPA2-${BUILD_CONFIG}.ipa" Payload
+
+      - name: Upload DLiPA2 IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DLiPA2-iOS-${{ env.BUILD_CONFIG }}-IPA
+          path: iOS/DLiPA2-${{ env.BUILD_CONFIG }}.ipa
