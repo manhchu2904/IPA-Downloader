@@ -10,7 +10,8 @@ final class IPAToolService: ObservableObject {
     @Published var initError: String?
 
     private var client: IpatoolbridgeClient?
-    private let workQueue = DispatchQueue(label: "com.dlipa2.ipatool.work", qos: .userInitiated)
+    // Concurrent queue so long-running downloads never block search, login, or version lookups.
+    private let workQueue = DispatchQueue(label: "com.dlipa2.ipatool.work", qos: .userInitiated, attributes: .concurrent)
     private let decoder = JSONDecoder()
 
     var selectedAccount: AppleAccount? {
@@ -32,7 +33,13 @@ final class IPAToolService: ObservableObject {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             let baseDir = appSupport.appendingPathComponent("DLiPA2Core", isDirectory: true)
             try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
-            self.client = try IpatoolbridgeNewClient(baseDir.path)
+
+            var err: NSError?
+            guard let initialized = IpatoolbridgeNewClient(baseDir.path, &err) else {
+                throw err ?? NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Go core"])
+            }
+            self.client = initialized
+
             Task {
                 await refreshAccounts()
                 refreshDownloadedFiles()
@@ -47,8 +54,8 @@ final class IPAToolService: ObservableObject {
     func refreshAccounts() async {
         guard let client else { return }
         do {
-            let json: String = try await runBlocking {
-                try client.listAccounts()
+            let json = try await runBridge { errPtr in
+                client.listAccounts(errPtr)
             }
             let list = try decoder.decode([AppleAccount].self, from: Data(json.utf8))
             self.accounts = list.sorted { $0.email.lowercased() < $1.email.lowercased() }
@@ -61,9 +68,11 @@ final class IPAToolService: ObservableObject {
     }
 
     func login(email: String, password: String, authCode: String) async throws -> LoginResponse {
-        guard let client else { throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"]) }
-        let json: String = try await runBlocking {
-            try client.login(email, password: password, authCode: authCode)
+        guard let client else {
+            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
+        let json = try await runBridge { errPtr in
+            client.login(email, password: password, authCode: authCode, error: errPtr)
         }
         let response = try decoder.decode(LoginResponse.self, from: Data(json.utf8))
         if response.success {
@@ -86,12 +95,14 @@ final class IPAToolService: ObservableObject {
     // MARK: - Search & Lookup
 
     func search(term: String, storefrontId: String, platform: String = "iphone", limit: Int = 25) async throws -> [AppItem] {
-        guard let client else { throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"]) }
+        guard let client else {
+            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
         guard let account = selectedAccount else {
             throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
-        let json: String = try await runBlocking {
-            try client.search(account.id, term: term, storefrontOverride: storefrontId, platformName: platform, limit: limit)
+        let json = try await runBridge { errPtr in
+            client.search(account.id, term: term, storefrontOverride: storefrontId, platformName: platform, limit: limit, error: errPtr)
         }
         return try decoder.decode([AppItem].self, from: Data(json.utf8))
     }
@@ -99,23 +110,27 @@ final class IPAToolService: ObservableObject {
     // MARK: - Version History
 
     func listVersions(for app: AppItem, platform: String = "iphone") async throws -> VersionHistory {
-        guard let client else { throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"]) }
+        guard let client else {
+            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
         guard let account = selectedAccount else {
             throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
-        let json: String = try await runBlocking {
-            try client.listVersions(account.id, appID: app.id, bundleID: app.bundleId, price: app.price, platformName: platform, purchaseIfNeeded: true)
+        let json = try await runBridge { errPtr in
+            client.listVersions(account.id, appID: app.id, bundleID: app.bundleId, price: app.price, platformName: platform, purchaseIfNeeded: true, error: errPtr)
         }
         return try decoder.decode(VersionHistory.self, from: Data(json.utf8))
     }
 
     func versionMetadata(for app: AppItem, versionId: String, platform: String = "iphone") async throws -> VersionMetadata {
-        guard let client else { throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"]) }
+        guard let client else {
+            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
         guard let account = selectedAccount else {
             throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
-        let json: String = try await runBlocking {
-            try client.getVersionMetadata(account.id, appID: app.id, bundleID: app.bundleId, versionID: versionId, platformName: platform)
+        let json = try await runBridge { errPtr in
+            client.getVersionMetadata(account.id, appID: app.id, bundleID: app.bundleId, versionID: versionId, platformName: platform, error: errPtr)
         }
         return try decoder.decode(VersionMetadata.self, from: Data(json.utf8))
     }
@@ -147,8 +162,8 @@ final class IPAToolService: ObservableObject {
 
         Task {
             do {
-                let _: String = try await runBlocking {
-                    try client.download(
+                _ = try await runBridge { errPtr in
+                    client.download(
                         downloadId,
                         accountID: account.id,
                         appID: app.id,
@@ -159,7 +174,8 @@ final class IPAToolService: ObservableObject {
                         platformName: platform,
                         outputDir: outputDir,
                         purchaseIfNeeded: true,
-                        listener: listener
+                        listener: listener,
+                        error: errPtr
                     )
                 }
                 if let idx = activeDownloads.firstIndex(where: { $0.id == downloadId }) {
@@ -217,7 +233,18 @@ final class IPAToolService: ObservableObject {
         refreshDownloadedFiles()
     }
 
-    // MARK: - Helper
+    // MARK: - Helpers
+
+    private func runBridge(_ work: @escaping (NSErrorPointer) -> String) async throws -> String {
+        try await runBlocking {
+            var err: NSError?
+            let result = work(&err)
+            if let err {
+                throw err
+            }
+            return result
+        }
+    }
 
     private func runBlocking<T>(_ work: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in

@@ -122,6 +122,7 @@ struct DownloadsView: View {
                 ShareSheet(activityItems: [item.url])
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     private func stageLabel(_ stage: String) -> String {

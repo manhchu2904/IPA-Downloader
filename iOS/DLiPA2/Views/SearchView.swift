@@ -102,6 +102,7 @@ struct SearchView: View {
                 runSearch()
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     private var filterBar: some View {

@@ -98,6 +98,7 @@ struct AccountsView: View {
                 Text(errorAlert ?? "")
             }
         }
+        .navigationViewStyle(.stack)
     }
 }
 
