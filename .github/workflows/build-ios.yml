@@ -4,10 +4,21 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Build configuration (Release or Debug)"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
 
 jobs:
   build-ios:
     runs-on: macos-15
+    env:
+      BUILD_CONFIG: ${{ inputs.configuration || 'Release' }}
 
     steps:
       - name: Checkout repository
@@ -28,22 +39,26 @@ jobs:
       - name: Initialize gomobile
         run: gomobile init
 
-      - name: Build libunicorn.a and Ipatoolbridge.xcframework
+      - name: Build libunicorn.a and Ipatoolbridge.xcframework (${{ env.BUILD_CONFIG }})
         run: |
           chmod +x scripts/build-xcframework.sh
-          ./scripts/build-xcframework.sh
+          if [ "$BUILD_CONFIG" = "Debug" ]; then
+            ./scripts/build-xcframework.sh --debug
+          else
+            ./scripts/build-xcframework.sh
+          fi
 
       - name: Generate Xcode project
         working-directory: iOS
         run: xcodegen generate
 
-      - name: Build unsigned iOS app (arm64)
+      - name: Build unsigned iOS app (${{ env.BUILD_CONFIG }}, arm64)
         working-directory: iOS
         run: |
           xcodebuild \
             -project DLiPA2.xcodeproj \
             -scheme DLiPA2 \
-            -configuration Release \
+            -configuration "$BUILD_CONFIG" \
             -sdk iphoneos \
             -arch arm64 \
             -derivedDataPath build \
@@ -56,12 +71,12 @@ jobs:
         working-directory: iOS
         run: |
           mkdir -p dist/Payload
-          cp -R build/Build/Products/Release-iphoneos/DLiPA2.app dist/Payload/
+          cp -R "build/Build/Products/${BUILD_CONFIG}-iphoneos/DLiPA2.app" dist/Payload/
           cd dist
-          zip -r ../DLiPA2.ipa Payload
+          zip -r "../DLiPA2-${BUILD_CONFIG}.ipa" Payload
 
-      - name: Upload DLiPA2.ipa artifact
+      - name: Upload DLiPA2 IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DLiPA2-iOS-IPA
-          path: iOS/DLiPA2.ipa
+          name: DLiPA2-iOS-${{ env.BUILD_CONFIG }}-IPA
+          path: iOS/DLiPA2-${{ env.BUILD_CONFIG }}.ipa
