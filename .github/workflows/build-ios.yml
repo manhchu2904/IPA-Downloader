@@ -1,0 +1,67 @@
+name: Build DLiPA2 iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Install build tools (cmake, xcodegen, gomobile)
+        run: |
+          brew install cmake xcodegen
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize gomobile
+        run: gomobile init
+
+      - name: Build libunicorn.a and Ipatoolbridge.xcframework
+        run: |
+          chmod +x scripts/build-xcframework.sh
+          ./scripts/build-xcframework.sh
+
+      - name: Generate Xcode project
+        working-directory: iOS
+        run: xcodegen generate
+
+      - name: Build unsigned iOS app (arm64)
+        working-directory: iOS
+        run: |
+          xcodebuild \
+            -project DLiPA2.xcodeproj \
+            -scheme DLiPA2 \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Package unsigned IPA
+        working-directory: iOS
+        run: |
+          mkdir -p dist/Payload
+          cp -R build/Build/Products/Release-iphoneos/DLiPA2.app dist/Payload/
+          cd dist
+          zip -r ../DLiPA2.ipa Payload
+
+      - name: Upload DLiPA2.ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DLiPA2-iOS-IPA
+          path: iOS/DLiPA2.ipa

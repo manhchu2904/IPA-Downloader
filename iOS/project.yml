@@ -1,0 +1,40 @@
+name: DLiPA2
+options:
+  bundleIdPrefix: com.dlipa2
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "16.0"
+
+targets:
+  DLiPA2:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: DLiPA2
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dlipa2.app
+        INFOPLIST_FILE: DLiPA2/Info.plist
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_BITCODE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-ObjC"
+          - "-Wl,-force_load,$(SRCROOT)/Frameworks/libunicorn.a"
+          - "-Wl,-export_dynamic"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Frameworks"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/Frameworks"
+    dependencies:
+      - framework: Frameworks/Ipatoolbridge.xcframework
+        embed: false
+      - sdk: libresolv.tbd
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
