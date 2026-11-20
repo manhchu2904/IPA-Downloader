@@ -3,6 +3,7 @@ import SwiftUI
 struct AccountsView: View {
     @EnvironmentObject private var service: IPAToolService
     @State private var showAddSheet = false
+    @State private var showDebugLog = false
     @State private var errorAlert: String?
     @State private var jitEnabled = JITHelper.isJITEnabled()
 
@@ -33,6 +34,11 @@ struct AccountsView: View {
                         Text("Hãy mở DLiPA2 qua StikDebug để kích hoạt JIT trước khi bấm Đăng nhập.")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    }
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        Label("Xem / Copy Debug Log", systemImage: "doc.text.magnifyingglass")
                     }
                 }
 
@@ -119,6 +125,9 @@ struct AccountsView: View {
             .sheet(isPresented: $showAddSheet) {
                 AddAccountSheet()
                     .environmentObject(service)
+            }
+            .sheet(isPresented: $showDebugLog) {
+                DebugLogView()
             }
             .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
                 Button("Đóng", role: .cancel) {}

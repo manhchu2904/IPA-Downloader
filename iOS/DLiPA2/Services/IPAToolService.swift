@@ -71,17 +71,24 @@ final class IPAToolService: ObservableObject {
         guard let client else {
             throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
-        let json = try await runBridge { errPtr in
-            client.login(email, password: password, authCode: authCode, error: errPtr)
-        }
-        let response = try decoder.decode(LoginResponse.self, from: Data(json.utf8))
-        if response.success {
-            await refreshAccounts()
-            if let acc = response.account {
-                selectedAccountId = acc.id
+        DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
+        do {
+            let json = try await runBridge { errPtr in
+                client.login(email, password: password, authCode: authCode, error: errPtr)
             }
+            let response = try decoder.decode(LoginResponse.self, from: Data(json.utf8))
+            DebugLogger.log("login() done: success=\(response.success) authCodeRequired=\(response.authCodeRequired)")
+            if response.success {
+                await refreshAccounts()
+                if let acc = response.account {
+                    selectedAccountId = acc.id
+                }
+            }
+            return response
+        } catch {
+            DebugLogger.log("login() error: \(error.localizedDescription)")
+            throw error
         }
-        return response
     }
 
     func removeAccount(_ account: AppleAccount) async throws {
