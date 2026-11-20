@@ -58,7 +58,7 @@ func NewClient(baseDir string) (*Client, error) {
 	return &Client{
 		baseDir:       baseDir,
 		os:            operatingsystem.New(),
-		machine:       newIOSMachine(baseDir).(*iosMachine),
+		machine:       newIOSMachine(baseDir),
 		stores:        make(map[string]appstore.AppStore),
 		activeCancels: make(map[string]context.CancelFunc),
 	}, nil

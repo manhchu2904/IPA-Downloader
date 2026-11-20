@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/majd/ipatool/v2/pkg/appstore"
@@ -90,7 +91,19 @@ func (c *Client) Download(
 	)
 
 	stopProgress := make(chan struct{})
+	var stopOnce sync.Once
+	var progressWG sync.WaitGroup
+	stopTicker := func() {
+		stopOnce.Do(func() {
+			close(stopProgress)
+			progressWG.Wait()
+		})
+	}
+	defer stopTicker()
+
+	progressWG.Add(1)
 	go func() {
+		defer progressWG.Done()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -124,13 +137,13 @@ func (c *Client) Download(
 			App:      app,
 			Platform: platform,
 		}); pErr != nil && !errors.Is(pErr, appstore.ErrLicenseAlreadyExists) {
-			close(stopProgress)
+			stopTicker()
 			return "", fmt.Errorf("failed to acquire free license: %w", pErr)
 		}
 		out, err = runDownload()
 	}
 
-	close(stopProgress)
+	stopTicker()
 
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)

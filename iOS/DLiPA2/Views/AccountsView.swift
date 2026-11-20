@@ -129,6 +129,9 @@ struct AccountsView: View {
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                jitEnabled = JITHelper.isJITEnabled()
+            }
             .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
                 Button("Đóng", role: .cancel) {}
             } message: {
@@ -153,6 +156,14 @@ private struct AddAccountSheet: View {
     var body: some View {
         NavigationView {
             Form {
+                if !JITHelper.isJITEnabled() {
+                    Section {
+                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở DLiPA2 qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                            .font(.footnote)
+                    }
+                }
+
                 Section("Thông tin Apple ID") {
                     TextField("Email Apple ID", text: $email)
                         .keyboardType(.emailAddress)
