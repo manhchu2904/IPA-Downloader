@@ -45,8 +45,8 @@ cp "$BUILD_DIR/unicorn-build/libunicorn.a" "$FRAMEWORKS_DIR/libunicorn.a"
 echo "==> [2/3] Syncing Core Go dependencies with latest majd/ipatool/v2..."
 cd "$ROOT_DIR/Core"
 go get github.com/majd/ipatool/v2@main
-go get golang.org/x/mobile/bind@latest
 go mod tidy
+go get golang.org/x/mobile/bind@latest
 
 echo "==> [3/3] Building Ipatoolbridge.xcframework via gomobile..."
 rm -rf "$FRAMEWORKS_DIR/Ipatoolbridge.xcframework"
