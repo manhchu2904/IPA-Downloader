@@ -130,16 +130,20 @@ func (c *Client) Download(
 	}
 
 	out, err := runDownload()
+	if errors.Is(err, appstore.ErrPasswordTokenExpired) {
+		if refreshed, rErr := c.refreshAccountToken(st, acc); rErr == nil {
+			acc = refreshed
+			out, err = runDownload()
+		}
+	}
 	if err != nil && errors.Is(err, appstore.ErrLicenseRequired) && purchaseIfNeeded && price == 0 {
 		notify(0, 0, 0, "acquiring_license")
-		if pErr := st.Purchase(appstore.PurchaseInput{
-			Account:  acc,
-			App:      app,
-			Platform: platform,
-		}); pErr != nil && !errors.Is(pErr, appstore.ErrLicenseAlreadyExists) {
+		updatedAcc, pErr := c.acquireFreeLicense(st, acc, app, platform)
+		if pErr != nil {
 			stopTicker()
 			return "", fmt.Errorf("failed to acquire free license: %w", pErr)
 		}
+		acc = updatedAcc
 		out, err = runDownload()
 	}
 

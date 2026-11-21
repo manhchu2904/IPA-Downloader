@@ -56,9 +56,11 @@ struct SearchView: View {
                             Image(systemName: "magnifyingglass")
                                 .font(.system(size: 36))
                                 .foregroundColor(.secondary)
-                            Text("Nhập tên ứng dụng để tìm kiếm trên App Store")
+                            Text("Nhập tên ứng dụng, Bundle ID, App ID hoặc dán link App Store")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -109,7 +111,7 @@ struct SearchView: View {
                 }
             }
             .navigationTitle("IPA Downloader")
-            .searchable(text: $query, prompt: "Tên ứng dụng (vd: Facebook, Spotify...)")
+            .searchable(text: $query, prompt: "Tên app, Bundle ID, App ID hoặc link App Store...")
             .onSubmit(of: .search) {
                 runSearch()
             }
@@ -118,39 +120,78 @@ struct SearchView: View {
     }
 
     private var filterBar: some View {
-        HStack(spacing: 12) {
-            Menu {
-                ForEach(Storefront.all) { sf in
-                    Button {
-                        selectedStorefront = sf
-                        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                            runSearch()
+        VStack(spacing: 8) {
+            if service.accounts.count > 1, let active = service.selectedAccount {
+                HStack {
+                    Image(systemName: "person.crop.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Apple ID đang dùng:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Menu {
+                        ForEach(service.accounts) { account in
+                            Button {
+                                service.selectedAccountId = account.id
+                                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    runSearch()
+                                }
+                            } label: {
+                                HStack {
+                                    Text("\(account.email) (\(account.storefrontCountryCode))")
+                                    if account.id == active.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
                         }
                     } label: {
-                        Text("\(sf.flag) \(sf.name) (\(sf.code))")
+                        HStack(spacing: 4) {
+                            Text(active.email)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                        }
                     }
+                    Spacer()
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(selectedStorefront.flag)
-                    Text(selectedStorefront.code)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground))
-                .cornerRadius(8)
             }
 
-            Picker("Nền tảng", selection: $selectedPlatform) {
-                ForEach(platforms, id: \.0) { item in
-                    Text(item.1).tag(item.0)
+            HStack(spacing: 12) {
+                Menu {
+                    ForEach(Storefront.all) { sf in
+                        Button {
+                            selectedStorefront = sf
+                            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                                runSearch()
+                            }
+                        } label: {
+                            Text("\(sf.flag) \(sf.name) (\(sf.code))")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(selectedStorefront.flag)
+                        Text(selectedStorefront.code)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(8)
                 }
+
+                Picker("Nền tảng", selection: $selectedPlatform) {
+                    ForEach(platforms, id: \.0) { item in
+                        Text(item.1).tag(item.0)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct AppDetailView: View {
     @EnvironmentObject private var service: IPAToolService
@@ -10,8 +11,34 @@ struct AppDetailView: View {
     @State private var resolvedMetadata: [String: VersionMetadata] = [:]
     @State private var isLoadingVersions = false
     @State private var loadingVersionId: String?
+    @State private var versionFilterText: String = ""
+    @State private var showManualVersionAlert = false
+    @State private var manualVersionIdInput: String = ""
     @State private var errorMessage: String?
     @State private var downloadStartedBanner = false
+
+    private var activeAccountEmail: String {
+        service.selectedAccount?.email ?? "Chưa chọn tài khoản"
+    }
+
+    private func filteredVersionIDs(from orderedIds: [String]) -> [String] {
+        let query = versionFilterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return orderedIds }
+        return orderedIds.filter { vid in
+            if vid.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+            if let displayVer = resolvedMetadata[vid]?.displayVersion,
+               displayVer.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+            if let dateStr = resolvedMetadata[vid]?.releaseDate,
+               dateStr.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+            return false
+        }
+    }
 
     var body: some View {
         List {
@@ -36,6 +63,19 @@ struct AppDetailView: View {
                 LabeledContentRow(title: "Bundle ID", value: app.bundleId)
                 LabeledContentRow(title: "App ID", value: String(app.id))
                 LabeledContentRow(title: "Phiên bản mới nhất", value: "v\(app.version)")
+
+                if service.accounts.count > 1 {
+                    Picker("Apple ID tải về", selection: Binding(
+                        get: { service.selectedAccountId ?? service.accounts.first?.id ?? "" },
+                        set: { service.selectedAccountId = $0 }
+                    )) {
+                        ForEach(service.accounts) { account in
+                            Text("\(account.email) (\(account.storefrontCountryCode))").tag(account.id)
+                        }
+                    }
+                } else {
+                    LabeledContentRow(title: "Apple ID tải về", value: activeAccountEmail)
+                }
             }
 
             Section {
@@ -49,6 +89,18 @@ struct AppDetailView: View {
                             .fontWeight(.semibold)
                     }
                 }
+
+                Button {
+                    manualVersionIdInput = ""
+                    showManualVersionAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "number.circle")
+                        Text("Nhập Version ID thủ công để tải...")
+                    }
+                }
+            } footer: {
+                Text("File .ipa tải xong sẽ được lưu riêng vào thư mục của Apple ID: \(activeAccountEmail)")
             }
 
             Section {
@@ -64,8 +116,34 @@ struct AppDetailView: View {
                         Text("Không có dữ liệu phiên bản cũ.")
                             .foregroundColor(.secondary)
                     } else {
-                        ForEach(orderedIds, id: \.self) { vid in
-                            versionRow(vid: vid, latestId: history.latestVersionId)
+                        if orderedIds.count > 5 {
+                            HStack {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                    .foregroundColor(.secondary)
+                                TextField("Lọc phiên bản (vd: 8.5, 2025, hoặc ID)...", text: $versionFilterText)
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                if !versionFilterText.isEmpty {
+                                    Button {
+                                        versionFilterText = ""
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+
+                        let visibleIds = filteredVersionIDs(from: orderedIds)
+                        if visibleIds.isEmpty {
+                            Text("Không có phiên bản nào khớp với \"\(versionFilterText)\".")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(visibleIds, id: \.self) { vid in
+                                versionRow(vid: vid, latestId: history.latestVersionId)
+                            }
                         }
                     }
                 } else {
@@ -92,7 +170,7 @@ struct AppDetailView: View {
                     }
                 }
             } footer: {
-                Text("Số phiên bản (vd: v1.2.3) được ánh xạ từ danh mục phiên bản công khai mà không gửi nhiều truy vấn lên Apple. Nếu bản nào chưa có tên, bạn có thể nhấn (i) để tra cứu riêng bản đó.")
+                Text("Số phiên bản (vd: v1.2.3) được ánh xạ từ danh mục phiên bản công khai mà không gửi nhiều truy vấn lên Apple. Nhấn giữ vào một phiên bản để sao chép nhanh ID hoặc số phiên bản.")
             }
         }
         .navigationTitle(app.name)
@@ -102,10 +180,24 @@ struct AppDetailView: View {
                 loadVersions()
             }
         }
+        .alert("Nhập External Version ID", isPresented: $showManualVersionAlert) {
+            TextField("Ví dụ: 871234567", text: $manualVersionIdInput)
+                .keyboardType(.numberPad)
+            Button("Tải ngay") {
+                let cleaned = manualVersionIdInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleaned.isEmpty else { return }
+                let label = resolvedMetadata[cleaned]?.displayVersion ?? cleaned
+                service.startDownload(app: app, externalVersionId: cleaned, versionLabel: label, platform: platform)
+                downloadStartedBanner = true
+            }
+            Button("Hủy", role: .cancel) {}
+        } message: {
+            Text("Nhập mã số External Version ID của phiên bản bạn muốn tải cho \(app.name).")
+        }
         .alert("Đã thêm vào hàng đợi tải", isPresented: $downloadStartedBanner) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Chuyển sang tab Tải xuống để theo dõi tiến trình và lấy file .ipa.")
+            Text("File .ipa sẽ được lưu trong thư mục của tài khoản \(activeAccountEmail). Chuyển sang tab Tải xuống để theo dõi tiến trình.")
         }
     }
 
@@ -182,6 +274,27 @@ struct AppDetailView: View {
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
+        .contextMenu {
+            Button {
+                let label = displayVer ?? vid
+                service.startDownload(app: app, externalVersionId: vid, versionLabel: label, platform: platform)
+                downloadStartedBanner = true
+            } label: {
+                Label("Tải phiên bản này", systemImage: "arrow.down.circle")
+            }
+            Button {
+                UIPasteboard.general.string = vid
+            } label: {
+                Label("Sao chép Version ID (\(vid))", systemImage: "doc.on.doc")
+            }
+            if let displayVer, !displayVer.isEmpty {
+                Button {
+                    UIPasteboard.general.string = "v\(displayVer) (\(vid))"
+                } label: {
+                    Label("Sao chép v\(displayVer)", systemImage: "tag")
+                }
+            }
+        }
     }
 
     private func formattedDate(_ isoString: String?) -> String? {
@@ -194,17 +307,33 @@ struct AppDetailView: View {
         errorMessage = nil
         Task {
             defer { isLoadingVersions = false }
+            async let publicDirTask = service.fetchPublicVersionDirectory(appId: app.id, platform: platform)
+            let publicDir = await publicDirTask
+
             do {
-                async let historyTask = service.listVersions(for: app, platform: platform)
-                async let publicDirTask = service.fetchPublicVersionDirectory(appId: app.id, platform: platform)
-
-                let history = try await historyTask
-                let publicMap = await publicDirTask
-
+                let history = try await service.listVersions(for: app, platform: platform, purchaseIfNeeded: false)
                 versionHistory = history
-                hydrateCachedMetadata(for: history, publicMap: publicMap)
+                hydrateCachedMetadata(for: history, publicMap: publicDir.map)
             } catch {
-                errorMessage = error.localizedDescription
+                // If the account does not yet own a license for this free app (or Apple's endpoint fails),
+                // still display the full public version history without error; license acquisition happens on Download.
+                if !publicDir.ordered.isEmpty {
+                    let newestFirstIds = publicDir.ordered.map { $0.versionId }
+                    let fallbackHistory = VersionHistory(
+                        latestVersionId: newestFirstIds.first ?? "",
+                        versionIds: Array(newestFirstIds.reversed())
+                    )
+                    versionHistory = fallbackHistory
+                    hydrateCachedMetadata(for: fallbackHistory, publicMap: publicDir.map)
+                } else {
+                    do {
+                        let history = try await service.listVersions(for: app, platform: platform, purchaseIfNeeded: true)
+                        versionHistory = history
+                        hydrateCachedMetadata(for: history, publicMap: publicDir.map)
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
             }
         }
     }

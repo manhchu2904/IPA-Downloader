@@ -160,6 +160,49 @@ func (c *Client) loadAccount(accountID string) (appstore.AppStore, appstore.Acco
 	return st, info.Account, nil
 }
 
+// refreshAccountToken silently re-authenticates using the stored credentials in keychain.json
+// when Apple reports ErrPasswordTokenExpired (matching majd/ipatool CLI retry behavior).
+func (c *Client) refreshAccountToken(st appstore.AppStore, acc appstore.Account) (appstore.Account, error) {
+	if acc.Email == "" || acc.Password == "" {
+		return acc, appstore.ErrPasswordTokenExpired
+	}
+	out, err := st.Login(appstore.LoginInput{
+		Email:    acc.Email,
+		Password: acc.Password,
+	})
+	if err != nil {
+		return acc, err
+	}
+	return out.Account, nil
+}
+
+// acquireFreeLicense obtains a free license for app, automatically refreshing the password token
+// if expired and reloading any server-corrected storefront from AccountInfo.
+func (c *Client) acquireFreeLicense(st appstore.AppStore, acc appstore.Account, app appstore.App, platform appstore.Platform) (appstore.Account, error) {
+	pErr := st.Purchase(appstore.PurchaseInput{
+		Account:  acc,
+		App:      app,
+		Platform: platform,
+	})
+	if errors.Is(pErr, appstore.ErrPasswordTokenExpired) {
+		if refreshed, rErr := c.refreshAccountToken(st, acc); rErr == nil {
+			acc = refreshed
+			pErr = st.Purchase(appstore.PurchaseInput{
+				Account:  acc,
+				App:      app,
+				Platform: platform,
+			})
+		}
+	}
+	if pErr != nil && !errors.Is(pErr, appstore.ErrLicenseAlreadyExists) {
+		return acc, pErr
+	}
+	if info, err := st.AccountInfo(); err == nil {
+		acc = info.Account
+	}
+	return acc, nil
+}
+
 func toAccountDTO(id string, acc appstore.Account) AccountDTO {
 	return AccountDTO{
 		ID:                  id,

@@ -63,8 +63,10 @@ struct ActiveDownload: Identifiable {
     let appName: String
     let bundleId: String
     let versionLabel: String
+    let accountEmail: String
     var downloadedBytes: Int64 = 0
     var totalBytes: Int64 = 0
+    var speedBytesPerSec: Double = 0
     var percent: Double = 0
     var stage: String = "preparing"
     var errorMessage: String?
@@ -75,6 +77,7 @@ struct DownloadedIPA: Identifiable, Hashable {
     let id: URL
     let url: URL
     let name: String
+    let accountEmail: String
     let size: Int64
     let createdAt: Date
 
