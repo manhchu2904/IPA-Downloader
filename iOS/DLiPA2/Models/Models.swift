@@ -31,6 +31,8 @@ struct AppItem: Codable, Identifiable, Hashable {
     let name: String
     let version: String
     let price: Double
+    let artworkUrl: String?
+    let sellerName: String?
     let platforms: [String]?
 
     var formattedPrice: String {

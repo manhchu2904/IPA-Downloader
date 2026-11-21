@@ -66,28 +66,40 @@ struct SearchView: View {
                             NavigationLink {
                                 AppDetailView(app: app, platform: selectedPlatform)
                             } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(app.name)
-                                            .font(.headline)
+                                HStack(spacing: 12) {
+                                    AppIconView(urlString: app.artworkUrl, size: 52)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack {
+                                            Text(app.name)
+                                                .font(.headline)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Text(app.formattedPrice)
+                                                .font(.caption)
+                                                .fontWeight(.semibold)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 3)
+                                                .background(Color.accentColor.opacity(0.15))
+                                                .foregroundColor(.accentColor)
+                                                .clipShape(Capsule())
+                                        }
+                                        if let seller = app.sellerName, !seller.isEmpty {
+                                            Text(seller)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(1)
+                                        } else {
+                                            Text(app.bundleId)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                        Text("v\(app.version) • \(app.bundleId)")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
                                             .lineLimit(1)
-                                        Spacer()
-                                        Text(app.formattedPrice)
-                                            .font(.caption)
-                                            .fontWeight(.semibold)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.accentColor.opacity(0.15))
-                                            .foregroundColor(.accentColor)
-                                            .clipShape(Capsule())
                                     }
-                                    Text(app.bundleId)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                    Text("v\(app.version) • ID: \(app.id)")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -163,6 +175,51 @@ struct SearchView: View {
                 errorMessage = error.localizedDescription
                 results = []
             }
+        }
+    }
+}
+
+struct AppIconView: View {
+    let urlString: String?
+    var size: CGFloat = 52
+
+    private var cornerRadius: CGFloat {
+        size * 0.225
+    }
+
+    var body: some View {
+        Group {
+            if let urlString, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty, .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+            Image(systemName: "app.fill")
+                .font(.system(size: size * 0.45))
+                .foregroundColor(.secondary.opacity(0.5))
         }
     }
 }

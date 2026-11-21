@@ -14,6 +14,9 @@ final class IPAToolService: ObservableObject {
     // Concurrent queue so long-running downloads never block search, login, or version lookups.
     private let workQueue = DispatchQueue(label: "com.dlipa2.ipatool.work", qos: .userInitiated, attributes: .concurrent)
     private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+    private var versionMetadataCache: [String: VersionMetadata] = [:]
+    private var versionCacheFileURL: URL?
 
     var selectedAccount: AppleAccount? {
         if let id = selectedAccountId, let match = accounts.first(where: { $0.id == id }) {
@@ -34,6 +37,13 @@ final class IPAToolService: ObservableObject {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             let baseDir = appSupport.appendingPathComponent("DLiPA2Core", isDirectory: true)
             try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+            let cacheFile = baseDir.appendingPathComponent("version_metadata_cache.json")
+            self.versionCacheFileURL = cacheFile
+            if let data = try? Data(contentsOf: cacheFile),
+               let cached = try? decoder.decode([String: VersionMetadata].self, from: data) {
+                self.versionMetadataCache = cached
+            }
 
             // Ensure HOME and TMPDIR exist before Go's runtime/stdlib cache lookups when launched via debugserver.
             setenv("HOME", baseDir.path, 1)
@@ -144,6 +154,70 @@ final class IPAToolService: ObservableObject {
 
     // MARK: - Version History
 
+    private func versionCacheKey(appId: Int64, versionId: String, platform: String) -> String {
+        "\(appId)_\(platform)_\(versionId)"
+    }
+
+    func cachedVersionMetadata(appId: Int64, versionId: String, platform: String = "iphone") -> VersionMetadata? {
+        versionMetadataCache[versionCacheKey(appId: appId, versionId: versionId, platform: platform)]
+    }
+
+    func cacheVersionMetadata(_ meta: VersionMetadata, appId: Int64, platform: String = "iphone") {
+        let key = versionCacheKey(appId: appId, versionId: meta.versionId, platform: platform)
+        versionMetadataCache[key] = meta
+        saveVersionMetadataCacheToDisk()
+    }
+
+    private func saveVersionMetadataCacheToDisk() {
+        guard let url = versionCacheFileURL,
+              let data = try? encoder.encode(versionMetadataCache) else {
+            return
+        }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Queries the public version history index (1 anonymous GET request, 0 requests to Apple)
+    /// to map External Version IDs -> vX.Y.Z and release dates instantly without triggering
+    /// Apple's volumeStoreDownloadProduct rate limits.
+    func fetchPublicVersionDirectory(appId: Int64, platform: String = "iphone") async -> [String: VersionMetadata] {
+        guard let url = URL(string: "https://apis.bilin.eu.org/history/\(appId)") else {
+            return [:]
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
+                return [:]
+            }
+            let decoded = try decoder.decode(PublicVersionHistoryResponse.self, from: data)
+            var mapped: [String: VersionMetadata] = [:]
+            for item in decoded.data ?? [] {
+                guard !item.versionIdString.isEmpty, !item.bundleVersion.isEmpty else { continue }
+                let meta = VersionMetadata(
+                    versionId: item.versionIdString,
+                    displayVersion: item.bundleVersion,
+                    releaseDate: item.createdAt
+                )
+                mapped[meta.versionId] = meta
+                let key = versionCacheKey(appId: appId, versionId: meta.versionId, platform: platform)
+                versionMetadataCache[key] = meta
+            }
+            if !mapped.isEmpty {
+                saveVersionMetadataCacheToDisk()
+            }
+            return mapped
+        } catch {
+            return [:]
+        }
+    }
+
+    var hasActiveDownloads: Bool {
+        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil }
+    }
+
     func listVersions(for app: AppItem, platform: String = "iphone") async throws -> VersionHistory {
         guard let client else {
             throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
@@ -154,10 +228,20 @@ final class IPAToolService: ObservableObject {
         let json = try await runBridge { errPtr in
             client.listVersions(account.id, appID: app.id, bundleID: app.bundleId, price: app.price, platformName: platform, purchaseIfNeeded: true, error: errPtr)
         }
-        return try decoder.decode(VersionHistory.self, from: Data(json.utf8))
+        let history = try decoder.decode(VersionHistory.self, from: Data(json.utf8))
+        if !history.latestVersionId.isEmpty && !app.version.isEmpty &&
+            cachedVersionMetadata(appId: app.id, versionId: history.latestVersionId, platform: platform) == nil {
+            let latestMeta = VersionMetadata(versionId: history.latestVersionId, displayVersion: app.version, releaseDate: nil)
+            cacheVersionMetadata(latestMeta, appId: app.id, platform: platform)
+        }
+        return history
     }
 
     func versionMetadata(for app: AppItem, versionId: String, platform: String = "iphone") async throws -> VersionMetadata {
+        if let cached = cachedVersionMetadata(appId: app.id, versionId: versionId, platform: platform),
+           cached.releaseDate != nil {
+            return cached
+        }
         guard let client else {
             throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
@@ -167,7 +251,9 @@ final class IPAToolService: ObservableObject {
         let json = try await runBridge { errPtr in
             client.getVersionMetadata(account.id, appID: app.id, bundleID: app.bundleId, versionID: versionId, platformName: platform, error: errPtr)
         }
-        return try decoder.decode(VersionMetadata.self, from: Data(json.utf8))
+        let meta = try decoder.decode(VersionMetadata.self, from: Data(json.utf8))
+        cacheVersionMetadata(meta, appId: app.id, platform: platform)
+        return meta
     }
 
     // MARK: - Downloads
@@ -303,5 +389,34 @@ private final class BridgeProgressListener: NSObject, IpatoolbridgeProgressListe
 
     func onProgress(_ downloadID: String?, downloadedBytes: Int64, totalBytes: Int64, percent: Double, stage: String?) {
         handler(downloadID ?? "", downloadedBytes, totalBytes, percent, stage ?? "")
+    }
+}
+
+private struct PublicVersionHistoryResponse: Decodable {
+    let data: [PublicVersionHistoryItem]?
+}
+
+private struct PublicVersionHistoryItem: Decodable {
+    let bundleVersion: String
+    let versionIdString: String
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case bundleVersion = "bundle_version"
+        case externalIdentifier = "external_identifier"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.bundleVersion = (try? container.decode(String.self, forKey: .bundleVersion)) ?? ""
+        if let intId = try? container.decode(Int64.self, forKey: .externalIdentifier) {
+            self.versionIdString = String(intId)
+        } else if let strId = try? container.decode(String.self, forKey: .externalIdentifier) {
+            self.versionIdString = strId
+        } else {
+            self.versionIdString = ""
+        }
+        self.createdAt = try? container.decode(String.self, forKey: .createdAt)
     }
 }

@@ -176,14 +176,28 @@ private struct AddAccountSheet: View {
                 }
 
                 Section("Thông tin Apple ID") {
-                    TextField("Email Apple ID", text: $email)
+                    TextField("Email hoặc SĐT Apple ID", text: $email)
                         .keyboardType(.emailAddress)
                         .textContentType(.username)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                        .onChange(of: email) { _ in
+                            if needsTwoFactor {
+                                needsTwoFactor = false
+                                authCode = ""
+                            }
+                            errorMessage = nil
+                        }
 
                     SecureField("Mật khẩu", text: $password)
                         .textContentType(.password)
+                        .onChange(of: password) { _ in
+                            if needsTwoFactor {
+                                needsTwoFactor = false
+                                authCode = ""
+                            }
+                            errorMessage = nil
+                        }
                 }
 
                 if needsTwoFactor {
@@ -191,10 +205,17 @@ private struct AddAccountSheet: View {
                         TextField("Mã xác thực 6 chữ số", text: $authCode)
                             .keyboardType(.numberPad)
                             .textContentType(.oneTimeCode)
+
+                        Button("Nhập lại Email / Mật khẩu") {
+                            needsTwoFactor = false
+                            authCode = ""
+                            errorMessage = nil
+                        }
+                        .font(.footnote)
                     } header: {
                         Text("Xác thực 2 yếu tố (2FA)")
                     } footer: {
-                        Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn.")
+                        Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn.\nLưu ý: Máy chủ App Store của Apple trả về cùng một mã phản hồi cho cả trường hợp cần 2FA lẫn khi nhập sai Email/Mật khẩu. Nếu thiết bị của bạn không hiện mã 2FA, hãy kiểm tra lại Email và Mật khẩu.")
                     }
                 }
 
@@ -234,14 +255,59 @@ private struct AddAccountSheet: View {
         }
     }
 
+    private static func isValidAppleID(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: { $0.isWhitespace }) else {
+            return false
+        }
+        if let atIndex = trimmed.firstIndex(of: "@") {
+            let local = trimmed[..<atIndex]
+            let domain = trimmed[trimmed.index(after: atIndex)...]
+            guard !local.isEmpty,
+                  !domain.contains("@"),
+                  let dotIndex = domain.lastIndex(of: "."),
+                  dotIndex > domain.startIndex,
+                  dotIndex < domain.index(before: domain.endIndex) else {
+                return false
+            }
+            return true
+        }
+        var digits = 0
+        for (idx, ch) in trimmed.enumerated() {
+            if ch.isNumber && ch.isASCII {
+                digits += 1
+            } else if ch == "+" && idx == 0 {
+                continue
+            } else if ch == "-" || ch == "(" || ch == ")" {
+                continue
+            } else {
+                return false
+            }
+        }
+        return digits >= 7
+    }
+
     private func performLogin() {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidAppleID(trimmedEmail) else {
+            errorMessage = "Apple ID không đúng định dạng. Vui lòng nhập email hợp lệ (ví dụ: ten@icloud.com) hoặc số điện thoại."
+            return
+        }
+        if needsTwoFactor {
+            let cleanedCode = authCode.filter { !$0.isWhitespace }
+            guard cleanedCode.count == 6, cleanedCode.allSatisfy({ $0.isNumber && $0.isASCII }) else {
+                errorMessage = "Vui lòng nhập đúng mã 2FA gồm 6 chữ số."
+                return
+            }
+        }
+
         isLoading = true
         errorMessage = nil
 
         Task {
             defer { isLoading = false }
             do {
-                let res = try await service.login(email: email, password: password, authCode: authCode)
+                let res = try await service.login(email: trimmedEmail, password: password, authCode: authCode)
                 if res.authCodeRequired {
                     needsTwoFactor = true
                 } else if res.success {
