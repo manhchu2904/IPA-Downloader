@@ -32,7 +32,7 @@ struct AccountsView: View {
                         .buttonStyle(.borderless)
                     }
                     if !jitEnabled {
-                        Text("Hãy mở DLiPA2 qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
+                        Text("Hãy mở IPA Downloader qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -164,18 +164,37 @@ private struct AddAccountSheet: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
+    private var isEmailFormatValid: Bool {
+        Self.isValidAppleID(email)
+    }
+
+    private var isTwoFactorCodeValid: Bool {
+        let cleaned = authCode.filter { !$0.isWhitespace }
+        return cleaned.count == 6 && cleaned.allSatisfy { $0.isNumber && $0.isASCII }
+    }
+
+    private var canSubmitLogin: Bool {
+        guard !isLoading, isEmailFormatValid, !password.isEmpty else {
+            return false
+        }
+        if needsTwoFactor {
+            return isTwoFactorCodeValid
+        }
+        return true
+    }
+
     var body: some View {
         NavigationView {
             Form {
                 if !JITHelper.isJITEnabled() {
                     Section {
-                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở DLiPA2 qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
+                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở IPA Downloader qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
                             .font(.footnote)
                     }
                 }
 
-                Section("Thông tin Apple ID") {
+                Section {
                     TextField("Email hoặc SĐT Apple ID", text: $email)
                         .keyboardType(.emailAddress)
                         .textContentType(.username)
@@ -198,6 +217,13 @@ private struct AddAccountSheet: View {
                             }
                             errorMessage = nil
                         }
+                } header: {
+                    Text("Thông tin Apple ID")
+                } footer: {
+                    if !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isEmailFormatValid {
+                        Text("Nhập đúng định dạng email (vd: ten@icloud.com) hoặc số điện thoại để bật nút Đăng nhập.")
+                            .foregroundColor(.orange)
+                    }
                 }
 
                 if needsTwoFactor {
@@ -242,7 +268,7 @@ private struct AddAccountSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+                    .disabled(!canSubmitLogin)
                 }
             }
             .navigationTitle("Thêm Apple ID")

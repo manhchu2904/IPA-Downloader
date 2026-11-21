@@ -108,7 +108,7 @@ struct SearchView: View {
                     }
                 }
             }
-            .navigationTitle("DLiPA2")
+            .navigationTitle("IPA Downloader")
             .searchable(text: $query, prompt: "Tên ứng dụng (vd: Facebook, Spotify...)")
             .onSubmit(of: .search) {
                 runSearch()

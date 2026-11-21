@@ -102,7 +102,7 @@ struct DownloadsView: View {
                         }
                     }
                 } header: {
-                    Text("File .ipa đã lưu (Files > On My iPhone > DLiPA2 > IPAs)")
+                    Text("File .ipa đã lưu (Files > On My iPhone > IPA Downloader > IPAs)")
                 }
             }
             .navigationTitle("Tải xuống")
