@@ -112,6 +112,67 @@ struct AccountsView: View {
                 } footer: {
                     Text("Thông tin đăng nhập được lưu cục bộ trên thiết bị và chỉ giao tiếp trực tiếp với máy chủ Apple.")
                 }
+
+                Section {
+                    HStack {
+                        Label("Phiên bản", systemImage: "app.badge.checkmark")
+                        Spacer()
+                        Text("v\(appVersion) (Build \(appBuild))")
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Label("Core Engine", systemImage: "cpu")
+                        Spacer()
+                        Text("ipatool v2 • Unicorn 2.1.4")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Label("Cơ chế JIT", systemImage: "memorychip")
+                        Spacer()
+                        Text("Split-W^X Dual-Map (iOS \(UIDevice.current.systemVersion))")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let repoURL = URL(string: "https://github.com/manhchu2904/IPA-Downloader") {
+                        Link(destination: repoURL) {
+                            HStack {
+                                Label("Mã nguồn (GitHub)", systemImage: "chevron.left.forwardslash.chevron.right")
+                                Spacer()
+                                Text("manhchu2904/IPA-Downloader")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if let ipatoolURL = URL(string: "https://github.com/majd/ipatool") {
+                        Link(destination: ipatoolURL) {
+                            HStack {
+                                Label("Lõi ipatool gốc", systemImage: "shippingbox")
+                                Spacer()
+                                Text("majd/ipatool")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Thông tin & Mã nguồn")
+                } footer: {
+                    Text("IPA Downloader • Tải trực tiếp file .ipa nguyên bản từ máy chủ App Store của Apple.")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 4)
+                }
             }
             .navigationTitle("Tài khoản")
             .toolbar {
@@ -144,6 +205,14 @@ struct AccountsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+    }
+
+    private var appBuild: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "1"
     }
 
     private func refreshJITState() {
