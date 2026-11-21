@@ -21,7 +21,9 @@ type iosMachine struct {
 	macCache string
 }
 
-func newIOSMachine(baseDir string) machine.Machine {
+var _ machine.Machine = (*iosMachine)(nil)
+
+func newIOSMachine(baseDir string) *iosMachine {
 	return &iosMachine{baseDir: baseDir}
 }
 

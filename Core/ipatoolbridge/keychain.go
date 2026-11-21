@@ -48,7 +48,11 @@ func (k *fileKeychain) save(store map[string][]byte) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(k.path, data, 0o600)
+	tmpPath := k.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, k.path)
 }
 
 func (k *fileKeychain) Get(key string) ([]byte, error) {

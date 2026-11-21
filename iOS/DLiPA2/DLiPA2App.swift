@@ -4,6 +4,11 @@ import SwiftUI
 struct DLiPA2App: App {
     @StateObject private var service = IPAToolService()
 
+    init() {
+        DebugLogger.start()
+        JITHelper.prepareStartupJIT26PoolIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

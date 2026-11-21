@@ -3,11 +3,46 @@ import SwiftUI
 struct AccountsView: View {
     @EnvironmentObject private var service: IPAToolService
     @State private var showAddSheet = false
+    @State private var showDebugLog = false
     @State private var errorAlert: String?
+    @State private var jitEnabled = JITHelper.isJITEnabled()
+    @State private var jitPoolReady = JITHelper.isJITPoolReady()
 
     var body: some View {
         NavigationView {
             List {
+                Section("Trạng thái JIT (Unicorn SAP)") {
+                    HStack {
+                        Image(systemName: jitEnabled ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(jitEnabled ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(jitEnabled ? "JIT đang bật (CS_DEBUGGED)" : "JIT chưa được bật")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • Pool: \(jitPoolReady ? "Sẵn sàng (32 MB)" : "Chưa cấp phát")")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            refreshJITState()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    if !jitEnabled {
+                        Text("Hãy mở DLiPA2 qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        Label("Xem / Copy Debug Log", systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+
                 if let initError = service.initError {
                     Section("Lỗi khởi tạo Core") {
                         Text(initError)
@@ -92,6 +127,16 @@ struct AccountsView: View {
                 AddAccountSheet()
                     .environmentObject(service)
             }
+            .sheet(isPresented: $showDebugLog) {
+                DebugLogView()
+            }
+            .onAppear {
+                jitEnabled = JITHelper.isJITEnabled()
+                jitPoolReady = JITHelper.isJITPoolReady()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshJITState()
+            }
             .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
                 Button("Đóng", role: .cancel) {}
             } message: {
@@ -99,6 +144,12 @@ struct AccountsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private func refreshJITState() {
+        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        jitEnabled = JITHelper.isJITEnabled()
+        jitPoolReady = JITHelper.isJITPoolReady()
     }
 }
 
@@ -116,6 +167,14 @@ private struct AddAccountSheet: View {
     var body: some View {
         NavigationView {
             Form {
+                if !JITHelper.isJITEnabled() {
+                    Section {
+                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở DLiPA2 qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                            .font(.footnote)
+                    }
+                }
+
                 Section("Thông tin Apple ID") {
                     TextField("Email Apple ID", text: $email)
                         .keyboardType(.emailAddress)
