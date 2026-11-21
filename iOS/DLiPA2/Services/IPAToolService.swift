@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Ipatoolbridge
 
 @MainActor
@@ -34,6 +35,12 @@ final class IPAToolService: ObservableObject {
             let baseDir = appSupport.appendingPathComponent("DLiPA2Core", isDirectory: true)
             try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
 
+            // Ensure HOME and TMPDIR exist before Go's runtime/stdlib cache lookups when launched via debugserver.
+            setenv("HOME", baseDir.path, 1)
+            if getenv("TMPDIR") == nil {
+                setenv("TMPDIR", FileManager.default.temporaryDirectory.path, 1)
+            }
+
             var err: NSError?
             guard let initialized = IpatoolbridgeNewClient(baseDir.path, &err) else {
                 throw err ?? NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Go core"])
@@ -43,9 +50,23 @@ final class IPAToolService: ObservableObject {
             Task {
                 await refreshAccounts()
                 refreshDownloadedFiles()
+                await prepareRuntimeIfNeeded()
             }
         } catch {
             self.initError = error.localizedDescription
+        }
+    }
+
+    private func prepareRuntimeIfNeeded() async {
+        guard let client else { return }
+        DebugLogger.log("prepare() background start")
+        do {
+            try await runBlocking {
+                try client.prepare()
+            }
+            DebugLogger.log("prepare() background done")
+        } catch {
+            DebugLogger.log("prepare() background error: \(error.localizedDescription)")
         }
     }
 
@@ -74,6 +95,12 @@ final class IPAToolService: ObservableObject {
         JITHelper.prepareStartupJIT26PoolIfNeeded()
         DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) poolReady=\(JITHelper.isJITPoolReady()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
         do {
+            DebugLogger.log("login() prepare assets start")
+            try await runBlocking {
+                try client.prepare()
+            }
+            DebugLogger.log("login() prepare assets done")
+
             let json = try await runBridge { errPtr in
                 client.login(email, password: password, authCode: authCode, error: errPtr)
             }
