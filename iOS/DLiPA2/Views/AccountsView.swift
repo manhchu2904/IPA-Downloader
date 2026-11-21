@@ -6,6 +6,7 @@ struct AccountsView: View {
     @State private var showDebugLog = false
     @State private var errorAlert: String?
     @State private var jitEnabled = JITHelper.isJITEnabled()
+    @State private var jitPoolReady = JITHelper.isJITPoolReady()
 
     var body: some View {
         NavigationView {
@@ -18,13 +19,13 @@ struct AccountsView: View {
                             Text(jitEnabled ? "JIT đang bật (CS_DEBUGGED)" : "JIT chưa được bật")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
-                            Text("Flags: \(JITHelper.codeSigningFlagsHex())")
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • Pool: \(jitPoolReady ? "Sẵn sàng (32 MB)" : "Chưa cấp phát")")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                         Button {
-                            jitEnabled = JITHelper.isJITEnabled()
+                            refreshJITState()
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
@@ -129,8 +130,12 @@ struct AccountsView: View {
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            .onAppear {
                 jitEnabled = JITHelper.isJITEnabled()
+                jitPoolReady = JITHelper.isJITPoolReady()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshJITState()
             }
             .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
                 Button("Đóng", role: .cancel) {}
@@ -139,6 +144,12 @@ struct AccountsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private func refreshJITState() {
+        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        jitEnabled = JITHelper.isJITEnabled()
+        jitPoolReady = JITHelper.isJITPoolReady()
     }
 }
 

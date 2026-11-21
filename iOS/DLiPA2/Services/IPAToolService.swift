@@ -71,7 +71,8 @@ final class IPAToolService: ObservableObject {
         guard let client else {
             throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
-        DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
+        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) poolReady=\(JITHelper.isJITPoolReady()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
         do {
             let json = try await runBridge { errPtr in
                 client.login(email, password: password, authCode: authCode, error: errPtr)

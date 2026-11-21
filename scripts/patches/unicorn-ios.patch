@@ -11,7 +11,7 @@
      have_pthread_jit_protect='no'
 --- a/qemu/include/tcg/tcg-apple-jit.h
 +++ b/qemu/include/tcg/tcg-apple-jit.h
-@@ -104,13 +104,11 @@
+@@ -104,13 +104,14 @@
  #endif
  
  
@@ -23,27 +23,320 @@
 -{
 -    return pthread_jit_write_protect_np(enabled);
 -}
++#include <stddef.h>
++
 +struct uc_struct;
 +void ipatool_jit_write_protect(struct uc_struct *uc, int enabled);
++ptrdiff_t ipatool_rx_diff_for_rw(const void *rw_addr);
 +#define jit_write_protect(enabled) ipatool_jit_write_protect(uc, enabled)
  
  #define JIT_CALLBACK_GUARD(x)                       \
  {                                                   \
+--- a/qemu/include/tcg/tcg.h
++++ b/qemu/include/tcg/tcg.h
+@@ -650,6 +650,7 @@
+     void *code_gen_epilogue;
+     void *code_gen_buffer;
+     void *initial_buffer;
++    ptrdiff_t splitwx_diff;
+     size_t initial_buffer_size;
+     size_t code_gen_buffer_size;
+     void *code_gen_ptr;
+@@ -1354,6 +1355,9 @@
+ 
+ #ifdef HAVE_TCG_QEMU_TB_EXEC
+ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr);
++#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++# define tcg_qemu_tb_exec(env, tb_ptr) \
++    ((uintptr_t (*)(void *, void *))((char *)env->uc->tcg_ctx->code_gen_prologue + env->uc->tcg_ctx->splitwx_diff))(env, (uint8_t *)(tb_ptr) + env->uc->tcg_ctx->splitwx_diff)
+ #else
+ # define tcg_qemu_tb_exec(env, tb_ptr) \
+     ((uintptr_t (*)(void *, void *))env->uc->tcg_ctx->code_gen_prologue)(env, tb_ptr)
+--- a/qemu/accel/tcg/tcg-runtime.c
++++ b/qemu/accel/tcg/tcg-runtime.c
+@@ -155,9 +155,17 @@
+ 
+     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, curr_cflags());
+     if (tb == NULL) {
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++        return (char *)uc->tcg_ctx->code_gen_epilogue + uc->tcg_ctx->splitwx_diff;
++#else
+         return uc->tcg_ctx->code_gen_epilogue;
++#endif
+     }
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    return (char *)tb->tc.ptr + uc->tcg_ctx->splitwx_diff;
++#else
+     return tb->tc.ptr;
++#endif
+ }
+ 
+ void HELPER(exit_atomic)(CPUArchState *env)
+--- a/qemu/tcg/tcg.c
++++ b/qemu/tcg/tcg.c
+@@ -353,6 +353,15 @@
+ TranslationBlock *tcg_tb_lookup(TCGContext *tcg_ctx, uintptr_t tc_ptr)
+ {
+     TranslationBlock *tb;
++
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    if (tcg_ctx->splitwx_diff != 0 && tcg_ctx->initial_buffer != NULL) {
++        uintptr_t rx_start = (uintptr_t)((char *)tcg_ctx->initial_buffer + tcg_ctx->splitwx_diff);
++        if (tc_ptr - rx_start < tcg_ctx->initial_buffer_size) {
++            tc_ptr = (uintptr_t)((intptr_t)tc_ptr - tcg_ctx->splitwx_diff);
++        }
++    }
++#endif
+ 
+     struct tb_tc s = { .ptr = (void *)tc_ptr };
+     tb = g_tree_lookup(tcg_ctx->tree, &s);
+@@ -534,7 +543,9 @@
+ 
+         tcg_region_bounds(tcg_ctx, i, &start, &end);
+ 
++#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+         (void)qemu_mprotect_none(end, page_size);
++#endif
+     }
+ 
+     tcg_ctx->tree = g_tree_new(tb_tc_cmp);
+@@ -858,6 +869,12 @@
+ 
+     buf1 = s->code_ptr;
+     flush_icache_range((uintptr_t)buf0, (uintptr_t)buf1);
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    if (s->splitwx_diff != 0) {
++        flush_icache_range((uintptr_t)((char *)buf0 + s->splitwx_diff),
++                           (uintptr_t)((char *)buf1 + s->splitwx_diff));
++    }
++#endif
+ 
+     /* Deduct the prologue from the buffer.  */
+     prologue_size = tcg_current_code_size(s);
+@@ -3858,6 +3875,12 @@
+ 
+     /* flush instruction cache */
+     flush_icache_range((uintptr_t)s->code_buf, (uintptr_t)s->code_ptr);
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    if (s->splitwx_diff != 0) {
++        flush_icache_range((uintptr_t)((char *)s->code_buf + s->splitwx_diff),
++                           (uintptr_t)((char *)s->code_ptr + s->splitwx_diff));
++    }
++#endif
+ 
+     return tcg_current_code_size(s);
+ }
+--- a/qemu/tcg/aarch64/tcg-target.inc.c
++++ b/qemu/tcg/aarch64/tcg-target.inc.c
+@@ -1055,6 +1055,7 @@
+ 
+     /* Look for host pointer values within 4G of the PC.  This happens
+        often when loading pointers to QEMU's own data structures.  */
++#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+     if (type == TCG_TYPE_I64) {
+         tcg_target_long disp = value - (intptr_t)s->code_ptr;
+         if (disp == sextract64(disp, 0, 21)) {
+@@ -1070,6 +1071,7 @@
+             return;
+         }
+     }
++#endif
+ 
+     /* Would it take fewer insns to begin with MOVN?  */
+     if (ctpop64(value) >= 32) {
+@@ -1337,13 +1339,15 @@
+ 
+ static inline void tcg_out_call(TCGContext *s, tcg_insn_unit *target)
+ {
++#if !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+     ptrdiff_t offset = target - s->code_ptr;
+     if (offset == sextract64(offset, 0, 26)) {
+         tcg_out_insn(s, 3206, BL, offset);
+-    } else {
+-        tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP, (intptr_t)target);
+-        tcg_out_callr(s, TCG_REG_TMP);
+-    }
++        return;
++    }
++#endif
++    tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP, (intptr_t)target);
++    tcg_out_callr(s, TCG_REG_TMP);
+ }
+ 
+ void tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_addr,
+@@ -1370,6 +1374,15 @@
+     pair = (uint64_t)i2 << 32 | i1;
+     atomic_set((uint64_t *)jmp_addr, pair);
+     flush_icache_range(jmp_addr, jmp_addr + 8);
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    {
++        ptrdiff_t rx_diff = ipatool_rx_diff_for_rw((const void *)jmp_addr);
++        if (rx_diff != 0) {
++            flush_icache_range((uintptr_t)((char *)jmp_addr + rx_diff),
++                               (uintptr_t)((char *)jmp_addr + rx_diff + 8));
++        }
++    }
++#endif
+ }
+ 
+ static inline void tcg_out_goto_label(TCGContext *s, TCGLabel *l)
 --- a/qemu/accel/tcg/translate-all.c
 +++ b/qemu/accel/tcg/translate-all.c
-@@ -1019,14 +1019,68 @@
-+#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-+static volatile int ipatool_jit_mode = 0; /* 1=MAP_JIT, 3=W^X mprotect, 4=JIT26 (StikDebug) */
-+
-+extern int csops(int pid, unsigned int ops, void *useraddr, size_t usersize);
-+
-+static int ipatool_is_cs_debugged(void)
+@@ -278,6 +278,19 @@
+  * When reset_icount is true, current TB will be interrupted and
+  * icount should be recalculated.
+  */
++static inline uintptr_t ipatool_normalize_rx_pc(TCGContext *tcg_ctx, uintptr_t pc)
 +{
-+    uint32_t flags = 0;
-+    if (csops((int)getpid(), 0, &flags, sizeof(flags)) == 0) {
-+        return (flags & 0x10000000u) != 0;
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    if (tcg_ctx && tcg_ctx->splitwx_diff != 0 && tcg_ctx->initial_buffer != NULL) {
++        uintptr_t rx_start = (uintptr_t)((char *)tcg_ctx->initial_buffer + tcg_ctx->splitwx_diff);
++        if (pc - rx_start < tcg_ctx->initial_buffer_size) {
++            pc = (uintptr_t)((intptr_t)pc - tcg_ctx->splitwx_diff);
++        }
 +    }
-+    return 0;
++#endif
++    return pc;
++}
++
+ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
+                                      uintptr_t searched_pc, bool reset_icount)
+ {
+@@ -287,6 +300,7 @@
+     uint8_t *p = (uint8_t *)tb->tc.ptr + tb->tc.size;
+     int i, j, num_insns = tb->icount;
+ 
++    searched_pc = ipatool_normalize_rx_pc(cpu->uc->tcg_ctx, searched_pc);
+     searched_pc -= GETPC_ADJ;
+ 
+     if (searched_pc < host_pc) {
+@@ -338,6 +352,7 @@
+      * tcg_init_ctx.code_gen_buffer check_offset will wrap to way
+      * above the code_gen_buffer_size
+      */
++    host_pc = ipatool_normalize_rx_pc(tcg_ctx, host_pc);
+     check_offset = host_pc - (uintptr_t) uc->tcg_ctx->code_gen_buffer;
+ 
+     if (check_offset < uc->tcg_ctx->code_gen_buffer_size) {
+@@ -1006,10 +1021,28 @@
+     }
+ }
+ #else
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++#define IPATOOL_JIT26_SLOT_SIZE (4u * 1024u * 1024u)
++#define IPATOOL_JIT26_MAX_SLOTS 8
++
++static volatile int ipatool_jit_mode = 0; /* 1=MAP_JIT, 3=W^X mprotect, 4=Split-W^X Pool */
++static ptrdiff_t ipatool_pool_rx_diff = 0;
++
++int ipatool_jit_pool_ready(void);
++int ipatool_jit26_init_pool(size_t pool_size);
++static void *ipatool_pool_alloc(size_t size);
++static int ipatool_pool_free(void *ptr);
++#endif
++
+ void free_code_gen_buffer(struct uc_struct *uc)
+ {
+     TCGContext *tcg_ctx = uc->tcg_ctx;
+     if (tcg_ctx->initial_buffer) {
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++        if (ipatool_pool_free(tcg_ctx->initial_buffer)) {
++            return;
++        }
++#endif
+         if (munmap(tcg_ctx->initial_buffer, tcg_ctx->initial_buffer_size)) {
+             perror("fail code_gen_buffer");
+         }
+@@ -1023,10 +1056,37 @@
+     int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+     size_t size = tcg_ctx->code_gen_buffer_size;
+     void *buf;
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++    (void)prot;
++    (void)flags;
++    if (!ipatool_jit_pool_ready()) {
++        ipatool_jit26_init_pool(IPATOOL_JIT26_MAX_SLOTS * IPATOOL_JIT26_SLOT_SIZE);
++    }
++    buf = ipatool_pool_alloc(size);
++    if (buf != NULL) {
++        tcg_ctx->splitwx_diff = ipatool_pool_rx_diff;
++        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=4 (split-W^X) rw=%p rx=%p size=%zu\n",
++                buf, (void *)((char *)buf + tcg_ctx->splitwx_diff), size);
++        return buf;
++    }
++    tcg_ctx->splitwx_diff = 0;
++    buf = mmap(NULL, size, PROT_WRITE | PROT_READ | PROT_EXEC,
++               MAP_PRIVATE | MAP_ANONYMOUS | 0x0800, -1, 0);
++    if (buf != MAP_FAILED) {
++        __atomic_store_n(&ipatool_jit_mode, 1, __ATOMIC_RELEASE);
++        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: fallback mode=1 (MAP_JIT) buf=%p size=%zu\n", buf, size);
++    } else {
++        buf = mmap(NULL, size, PROT_WRITE | PROT_READ,
++                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        __atomic_store_n(&ipatool_jit_mode, 3, __ATOMIC_RELEASE);
++        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: fallback mode=3 (W^X) buf=%p size=%zu\n", buf, size);
++    }
++#else
+ #ifdef USE_MAP_JIT
+     flags |= MAP_JIT;
+ #endif
+     buf = mmap(NULL, size, prot, flags, -1, 0);
++#endif
+     if (buf == MAP_FAILED) {
+         return NULL;
+     }
+@@ -1706,7 +1766,7 @@
+     int gen_code_size, search_size, max_insns;
+ 
+     assert_memory_lock();
+-#ifdef HAVE_PTHREAD_JIT_PROTECT
++#if defined(HAVE_PTHREAD_JIT_PROTECT) || defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+     tb_exec_unlock(cpu->uc);
+ #endif
+     phys_pc = get_page_addr_code(env, pc);
+@@ -2172,7 +2232,7 @@
+ }
+ 
+ 
+-#if defined(__APPLE__) && defined(HAVE_PTHREAD_JIT_PROTECT) && (defined(__arm__) || defined(__aarch64__))
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+ static bool tb_exec_is_locked(struct uc_struct *uc)
+ {
+     return uc->current_executable;
+@@ -2206,3 +2266,521 @@
+ {
+     tb_exec_change(uc, false);
+ }
++
++#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
++#include <dlfcn.h>
++#include <libkern/OSCacheControl.h>
++#include <mach/arm/thread_status.h>
++#include <mach/mach.h>
++#include <mach/vm_map.h>
++#include <pthread.h>
++#include <sys/ucontext.h>
++#include <unistd.h>
++
++static pthread_mutex_t ipatool_pool_lock = PTHREAD_MUTEX_INITIALIZER;
++static uint8_t *ipatool_pool_rw_base = NULL;
++static uint8_t *ipatool_pool_rx_base = NULL;
++static size_t ipatool_pool_size = 0;
++static int ipatool_pool_slots = 0;
++static volatile uint32_t ipatool_pool_used_mask = 0;
++
++static int ipatool_cs_debugged(void)
++{
++    typedef int (*csops_fn_t)(pid_t, unsigned int, void *, size_t);
++    csops_fn_t fn = (csops_fn_t)dlsym(RTLD_DEFAULT, "csops");
++    if (!fn) {
++        return 0;
++    }
++    uint32_t flags = 0;
++    if (fn(getpid(), 0u, &flags, sizeof(flags)) != 0) {
++        return 0;
++    }
++    return (flags & 0x10000000u) != 0;
 +}
 +
 +#if defined(__aarch64__)
@@ -56,57 +349,443 @@
 +        "ret\n"
 +    );
 +}
++
++__attribute__((noinline, optnone, naked))
++static void ipatool_jit26_detach(void)
++{
++    __asm__ volatile(
++        "mov x16, #0\n"
++        "brk #0xf00d\n"
++        "ret\n"
++    );
++}
++
++__attribute__((noinline, optnone, naked))
++static uint64_t ipatool_brk_probe(void)
++{
++    __asm__ volatile(
++        "brk #0x69\n"
++        "ret\n"
++    );
++}
++
++static volatile sig_atomic_t ipatool_trap_expecting = 0;
++static volatile sig_atomic_t ipatool_trap_unanswered = 0;
++static struct sigaction ipatool_prev_sigtrap;
++
++static void ipatool_sigtrap_handler(int sig, siginfo_t *info, void *ctx)
++{
++    if (ipatool_trap_expecting && ctx != NULL) {
++        ucontext_t *uc = (ucontext_t *)ctx;
++#if defined(__DARWIN_OPAQUE_ARM_THREAD_STATE64) && __DARWIN_OPAQUE_ARM_THREAD_STATE64
++        uintptr_t pc = (uintptr_t)arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
++#else
++        uintptr_t pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
 +#endif
++        uint32_t insn = *(volatile uint32_t *)pc;
++        if ((insn & 0xFFE0001Fu) == 0xD4200000u) {
++            uint32_t imm = (insn >> 5) & 0xFFFFu;
++            if (imm == 0x69u || imm == 0xF00Du) {
++                uc->uc_mcontext->__ss.__x[0] = 0;
++#if defined(__DARWIN_OPAQUE_ARM_THREAD_STATE64) && __DARWIN_OPAQUE_ARM_THREAD_STATE64
++                arm_thread_state64_set_pc_fptr(uc->uc_mcontext->__ss, (void *)(pc + 4));
++#else
++                uc->uc_mcontext->__ss.__pc = (uint64_t)(pc + 4);
++#endif
++                ipatool_trap_unanswered = 1;
++                return;
++            }
++        }
++    }
++    sigaction(SIGTRAP, &ipatool_prev_sigtrap, NULL);
++    (void)sig;
++    (void)info;
++}
++
++static void ipatool_install_trap_guard(void)
++{
++    struct sigaction sa;
++    memset(&sa, 0, sizeof(sa));
++    sa.sa_sigaction = ipatool_sigtrap_handler;
++    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
++    sigemptyset(&sa.sa_mask);
++    ipatool_trap_unanswered = 0;
++    ipatool_trap_expecting = 1;
++    sigaction(SIGTRAP, &sa, &ipatool_prev_sigtrap);
++}
++
++static void ipatool_remove_trap_guard(void)
++{
++    ipatool_trap_expecting = 0;
++    sigaction(SIGTRAP, &ipatool_prev_sigtrap, NULL);
++}
 +#endif
 +
- static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
- {
-     TCGContext *tcg_ctx = uc->tcg_ctx;
-     int prot = PROT_WRITE | PROT_READ | PROT_EXEC;
-     int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-     size_t size = tcg_ctx->code_gen_buffer_size;
-     void *buf;
-+#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-+    buf = mmap(NULL, size, PROT_WRITE | PROT_READ | PROT_EXEC,
-+               MAP_PRIVATE | MAP_ANONYMOUS | 0x0800, -1, 0);
-+    if (buf != MAP_FAILED) {
-+        __atomic_store_n(&ipatool_jit_mode, 1, __ATOMIC_RELEASE);
-+        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=1 (MAP_JIT) buf=%p size=%zu\n", buf, size);
-+    } else if (ipatool_is_cs_debugged()) {
-+#if defined(__aarch64__)
-+        buf = mmap(NULL, size, PROT_WRITE | PROT_READ | PROT_EXEC,
-+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-+        if (buf != MAP_FAILED) {
-+            void *prepared = ipatool_jit26_prepare_region(buf, size);
-+            fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=4 (JIT26) raw=%p prepared=%p size=%zu\n", buf, prepared, size);
-+            if (prepared != NULL && prepared != MAP_FAILED) {
-+                buf = prepared;
-+            }
-+            __atomic_store_n(&ipatool_jit_mode, 4, __ATOMIC_RELEASE);
-+        }
-+#endif
-+    } else {
-+        buf = mmap(NULL, size, PROT_WRITE | PROT_READ,
-+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-+        __atomic_store_n(&ipatool_jit_mode, 3, __ATOMIC_RELEASE);
-+        fprintf(stderr, "[unicorn-ios] alloc_code_gen_buffer: mode=3 (W^X) buf=%p size=%zu\n", buf, size);
++static int ipatool_page_has_exec(void *p, vm_prot_t *out_prot, vm_prot_t *out_max_prot)
++{
++    vm_address_t addr = (vm_address_t)p;
++    vm_size_t size = 0;
++    natural_t depth = 0;
++    vm_region_submap_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
++    kern_return_t kr = vm_region_recurse_64(mach_task_self(), &addr, &size, &depth,
++                                            (vm_region_recurse_info_t)&info, &count);
++    if (kr != KERN_SUCCESS) {
++        if (out_prot) *out_prot = 0;
++        if (out_max_prot) *out_max_prot = 0;
++        return 0;
 +    }
-+#else
- #ifdef USE_MAP_JIT
-     flags |= MAP_JIT;
- #endif
-     buf = mmap(NULL, size, prot, flags, -1, 0);
++    if (out_prot) *out_prot = info.protection;
++    if (out_max_prot) *out_max_prot = info.max_protection;
++    return (info.protection & VM_PROT_EXECUTE) != 0;
++}
++
++static sigjmp_buf ipatool_selftest_jmp;
++static volatile sig_atomic_t ipatool_selftest_active = 0;
++
++static void ipatool_selftest_fault(int sig)
++{
++    if (ipatool_selftest_active) {
++        siglongjmp(ipatool_selftest_jmp, sig ? sig : -1);
++    }
++    signal(sig, SIG_DFL);
++    raise(sig);
++}
++
++static int ipatool_dualmap_selftest(uint8_t *rw, uint8_t *rx, const char *label)
++{
++    /* Pass 1: movz w0, #0x5a5a ; ret */
++    static const uint32_t kCode1[2] = { 0x528B4B40u, 0xD65F03C0u };
++    /* Pass 2: movz w0, #0x1234 ; ret */
++    static const uint32_t kCode2[2] = { 0x52824680u, 0xD65F03C0u };
++
++    if (!rw || !rx) {
++        return 0;
++    }
++
++    vm_prot_t cur_rx = 0, max_rx = 0, cur_rw = 0, max_rw = 0;
++    int has_exec = ipatool_page_has_exec(rx, &cur_rx, &max_rx);
++    (void)ipatool_page_has_exec(rw, &cur_rw, &max_rw);
++    fprintf(stderr, "[unicorn-ios] %s: rw=%p (prot=0x%x/0x%x) rx=%p (prot=0x%x/0x%x exec=%d)\n",
++            label, (void *)rw, (unsigned)cur_rw, (unsigned)max_rw,
++            (void *)rx, (unsigned)cur_rx, (unsigned)max_rx, has_exec);
++    if (!has_exec) {
++        return 0;
++    }
++
++    struct sigaction sa, prev_bus, prev_segv, prev_ill;
++    memset(&sa, 0, sizeof(sa));
++    sa.sa_handler = ipatool_selftest_fault;
++    sa.sa_flags = SA_ONSTACK;
++    sigemptyset(&sa.sa_mask);
++    sigaction(SIGBUS, &sa, &prev_bus);
++    sigaction(SIGSEGV, &sa, &prev_segv);
++    sigaction(SIGILL, &sa, &prev_ill);
++
++    volatile int ok = 0;
++    int fault_sig = sigsetjmp(ipatool_selftest_jmp, 1);
++    if (fault_sig == 0) {
++        ipatool_selftest_active = 1;
++
++        memcpy(rw, kCode1, sizeof(kCode1));
++        sys_icache_invalidate(rw, sizeof(kCode1));
++        sys_icache_invalidate(rx, sizeof(kCode1));
++
++        uint32_t rb1[2] = {0, 0};
++        memcpy(rb1, rx, sizeof(rb1));
++        if (rb1[0] != kCode1[0] || rb1[1] != kCode1[1]) {
++            fprintf(stderr, "[unicorn-ios] %s: pass1 readback mismatch\n", label);
++            goto done;
++        }
++        int (*fn1)(void) = (int (*)(void))(void *)rx;
++        int r1 = fn1();
++        if (r1 != 0x5a5a) {
++            fprintf(stderr, "[unicorn-ios] %s: pass1 returned 0x%x != 0x5a5a\n", label, r1);
++            goto done;
++        }
++
++        memcpy(rw + 16, kCode2, sizeof(kCode2));
++        sys_icache_invalidate(rw + 16, sizeof(kCode2));
++        sys_icache_invalidate(rx + 16, sizeof(kCode2));
++
++        int (*fn2)(void) = (int (*)(void))(void *)(rx + 16);
++        int r2 = fn2();
++        if (r2 != 0x1234) {
++            fprintf(stderr, "[unicorn-ios] %s: pass2 returned 0x%x != 0x1234\n", label, r2);
++            goto done;
++        }
++
++        memset(rw, 0, 32);
++        sys_icache_invalidate(rw, 32);
++        sys_icache_invalidate(rx, 32);
++        ok = 1;
++    } else {
++        fprintf(stderr, "[unicorn-ios] %s: selftest faulted with sig=%d\n", label, fault_sig);
++    }
++
++done:
++    ipatool_selftest_active = 0;
++    sigaction(SIGBUS, &prev_bus, NULL);
++    sigaction(SIGSEGV, &prev_segv, NULL);
++    sigaction(SIGILL, &prev_ill, NULL);
++    if (ok) {
++        fprintf(stderr, "[unicorn-ios] %s: selftest PASS (2-pass verified)\n", label);
++    }
++    return ok;
++}
++
++static int ipatool_try_alias_rw_for_rx(void *rx_ptr, size_t pool_size, const char *label, uint8_t **out_rw)
++{
++    vm_address_t rw_addr = 0;
++    vm_prot_t cur = 0, max = 0;
++    kern_return_t kr = vm_remap(mach_task_self(), &rw_addr, pool_size, 0, VM_FLAGS_ANYWHERE,
++                                mach_task_self(), (vm_address_t)rx_ptr, FALSE, &cur, &max,
++                                VM_INHERIT_NONE);
++    if (kr != KERN_SUCCESS) {
++        fprintf(stderr, "[unicorn-ios] %s: vm_remap RW failed kr=0x%x (%s)\n", label, (unsigned)kr, mach_error_string(kr));
++        return 0;
++    }
++    if (mprotect((void *)rw_addr, pool_size, PROT_READ | PROT_WRITE) != 0) {
++        fprintf(stderr, "[unicorn-ios] %s: mprotect(RW) errno=%d (%s); trying vm_protect\n", label, errno, strerror(errno));
++        kr = vm_protect(mach_task_self(), rw_addr, pool_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
++        if (kr != KERN_SUCCESS) {
++            fprintf(stderr, "[unicorn-ios] %s: vm_protect(RW) failed kr=0x%x\n", label, (unsigned)kr);
++            munmap((void *)rw_addr, pool_size);
++            return 0;
++        }
++    }
++    *out_rw = (uint8_t *)rw_addr;
++    return 1;
++}
++
++static int ipatool_commit_pool(uint8_t *rw, uint8_t *rx, size_t pool_size, int slots, const char *source)
++{
++    ipatool_pool_size = pool_size;
++    ipatool_pool_slots = slots;
++    ipatool_pool_rx_diff = rx - rw;
++    __atomic_store_n(&ipatool_pool_used_mask, 0u, __ATOMIC_RELEASE);
++    __atomic_store_n(&ipatool_pool_rx_base, rx, __ATOMIC_RELEASE);
++    __atomic_store_n(&ipatool_pool_rw_base, rw, __ATOMIC_RELEASE);
++    __atomic_store_n(&ipatool_jit_mode, 4, __ATOMIC_RELEASE);
++    fprintf(stderr, "[unicorn-ios] JIT pool READY (%s): rw=%p rx=%p diff=%td size=%zu slots=%d\n",
++            source, (void *)rw, (void *)rx, ipatool_pool_rx_diff, pool_size, slots);
++    return 1;
++}
++
++__attribute__((visibility("default")))
++int ipatool_jit_pool_ready(void)
++{
++    return (__atomic_load_n(&ipatool_pool_rw_base, __ATOMIC_ACQUIRE) != NULL &&
++            __atomic_load_n(&ipatool_pool_rx_base, __ATOMIC_ACQUIRE) != NULL) ? 1 : 0;
++}
++
++__attribute__((visibility("default")))
++ptrdiff_t ipatool_rx_diff_for_rw(const void *rw_addr)
++{
++    const uint8_t *rw_base = __atomic_load_n(&ipatool_pool_rw_base, __ATOMIC_ACQUIRE);
++    if (rw_base != NULL && rw_addr != NULL) {
++        const uint8_t *p = (const uint8_t *)rw_addr;
++        if (p >= rw_base && p < rw_base + ipatool_pool_size) {
++            return ipatool_pool_rx_diff;
++        }
++    }
++    return 0;
++}
++
++__attribute__((visibility("default")))
++int ipatool_jit26_init_pool(size_t pool_size)
++{
++    pthread_mutex_lock(&ipatool_pool_lock);
++    if (ipatool_jit_pool_ready()) {
++        pthread_mutex_unlock(&ipatool_pool_lock);
++        return 1;
++    }
++
++    if (pool_size < IPATOOL_JIT26_SLOT_SIZE) {
++        pool_size = IPATOOL_JIT26_SLOT_SIZE;
++    }
++    int slots = (int)(pool_size / IPATOOL_JIT26_SLOT_SIZE);
++    if (slots > IPATOOL_JIT26_MAX_SLOTS) {
++        slots = IPATOOL_JIT26_MAX_SLOTS;
++    }
++    pool_size = (size_t)slots * IPATOOL_JIT26_SLOT_SIZE;
++
++#if defined(__aarch64__)
++    /* Tier 1: StikDebug universal.js breakpoint RPC (brk #0x69 / brk #0xf00d), guarded by SIGTRAP handler */
++    ipatool_install_trap_guard();
++    uint64_t probe = ipatool_brk_probe();
++    int probe_unanswered = ipatool_trap_unanswered;
++    ipatool_remove_trap_guard();
++
++    if (!probe_unanswered && probe != 0) {
++        fprintf(stderr, "[unicorn-ios] Tier 1: brk #0x69 answered (0x%llx), requesting %zu bytes\n",
++                (unsigned long long)probe, pool_size);
++        ipatool_install_trap_guard();
++        void *rx = ipatool_jit26_prepare_region(NULL, pool_size);
++        int req_unanswered = ipatool_trap_unanswered;
++        ipatool_remove_trap_guard();
++
++        if (!req_unanswered && rx != NULL && rx != MAP_FAILED) {
++            uint8_t *rw = NULL;
++            if (ipatool_try_alias_rw_for_rx(rx, pool_size, "Tier1", &rw)) {
++                ipatool_install_trap_guard();
++                ipatool_jit26_detach();
++                ipatool_remove_trap_guard();
++
++                if (ipatool_dualmap_selftest(rw, (uint8_t *)rx, "Tier1-brk26")) {
++                    ipatool_commit_pool(rw, (uint8_t *)rx, pool_size, slots, "Tier1-brk26");
++                    pthread_mutex_unlock(&ipatool_pool_lock);
++                    return 1;
++                }
++                munmap(rw, pool_size);
++            } else {
++                ipatool_install_trap_guard();
++                ipatool_jit26_detach();
++                ipatool_remove_trap_guard();
++            }
++            munmap(rx, pool_size);
++        } else {
++            fprintf(stderr, "[unicorn-ios] Tier 1: prepare failed (unanswered=%d, rx=%p)\n",
++                    req_unanswered, rx);
++        }
++    } else {
++        fprintf(stderr, "[unicorn-ios] Tier 1: no brk #0x69 servicer (unanswered=%d, probe=0x%llx)\n",
++                probe_unanswered, (unsigned long long)probe);
++    }
 +#endif
-     if (buf == MAP_FAILED) {
-         return NULL;
-     }
-@@ -2172,7 +2226,51 @@
- }
- 
- 
--#if defined(__APPLE__) && defined(HAVE_PTHREAD_JIT_PROTECT) && (defined(__arm__) || defined(__aarch64__))
-+extern void *dlsym(void *handle, const char *symbol);
-+extern void sys_icache_invalidate(void *start, size_t len);
++
++    int debugged = ipatool_cs_debugged();
++    int jailbroken = (access("/var/jb", F_OK) == 0);
++    if (debugged || jailbroken) {
++        /* Tier 2A: mmap(RW) -> vm_remap(RX) -> mprotect(RX) [LinuxRunner / DolphiniOS classic] */
++        void *rw2a = mmap(NULL, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++        if (rw2a != MAP_FAILED) {
++            vm_address_t rx_addr = 0;
++            vm_prot_t cur = 0, max = 0;
++            kern_return_t kr = vm_remap(mach_task_self(), &rx_addr, pool_size, 0, VM_FLAGS_ANYWHERE,
++                                        mach_task_self(), (vm_address_t)rw2a, FALSE, &cur, &max,
++                                        VM_INHERIT_NONE);
++            if (kr == KERN_SUCCESS) {
++                if (mprotect((void *)rx_addr, pool_size, PROT_READ | PROT_EXEC) == 0 ||
++                    vm_protect(mach_task_self(), rx_addr, pool_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS) {
++                    if (ipatool_dualmap_selftest((uint8_t *)rw2a, (uint8_t *)rx_addr, "Tier2A-RW->RX")) {
++                        ipatool_commit_pool((uint8_t *)rw2a, (uint8_t *)rx_addr, pool_size, slots, "Tier2A-RW->RX");
++                        pthread_mutex_unlock(&ipatool_pool_lock);
++                        return 1;
++                    }
++                } else {
++                    fprintf(stderr, "[unicorn-ios] Tier2A: protect RX failed errno=%d (%s)\n", errno, strerror(errno));
++                }
++                munmap((void *)rx_addr, pool_size);
++            } else {
++                fprintf(stderr, "[unicorn-ios] Tier2A: vm_remap RX failed kr=0x%x\n", (unsigned)kr);
++            }
++            munmap(rw2a, pool_size);
++        }
++
++        /* Tier 2B: mmap(RX) -> vm_remap(RW) -> mprotect(RW) [Flycast-iOS vmem_no_txm] */
++        void *rx2b = mmap(NULL, pool_size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
++        if (rx2b != MAP_FAILED) {
++            uint8_t *rw2b = NULL;
++            if (ipatool_try_alias_rw_for_rx(rx2b, pool_size, "Tier2B-RX->RW", &rw2b)) {
++                if (ipatool_dualmap_selftest(rw2b, (uint8_t *)rx2b, "Tier2B-RX->RW")) {
++                    ipatool_commit_pool(rw2b, (uint8_t *)rx2b, pool_size, slots, "Tier2B-RX->RW");
++                    pthread_mutex_unlock(&ipatool_pool_lock);
++                    return 1;
++                }
++                munmap(rw2b, pool_size);
++            }
++            munmap(rx2b, pool_size);
++        } else {
++            fprintf(stderr, "[unicorn-ios] Tier2B: mmap(RX) failed errno=%d (%s)\n", errno, strerror(errno));
++        }
++
++        /* Tier 2C: mmap(RWX) -> vm_remap(RW) -> vm_protect(rx, RX) [Husk plain] */
++        void *rx2c = mmap(NULL, pool_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
++        if (rx2c != MAP_FAILED) {
++            uint8_t *rw2c = NULL;
++            if (ipatool_try_alias_rw_for_rx(rx2c, pool_size, "Tier2C-RWX->RW", &rw2c)) {
++                if (mprotect(rx2c, pool_size, PROT_READ | PROT_EXEC) == 0 ||
++                    vm_protect(mach_task_self(), (vm_address_t)rx2c, pool_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS) {
++                    if (ipatool_dualmap_selftest(rw2c, (uint8_t *)rx2c, "Tier2C-RWX->RW")) {
++                        ipatool_commit_pool(rw2c, (uint8_t *)rx2c, pool_size, slots, "Tier2C-RWX->RW");
++                        pthread_mutex_unlock(&ipatool_pool_lock);
++                        return 1;
++                    }
++                }
++                munmap(rw2c, pool_size);
++            }
++            munmap(rx2c, pool_size);
++        }
++    } else {
++        fprintf(stderr, "[unicorn-ios] Tier 2 skipped (CS_DEBUGGED=0, jailbroken=0)\n");
++    }
++
++    /* Tier 3: MAP_JIT (0x0800) + vm_remap dual-mapping */
++    void *rx3 = mmap(NULL, pool_size, PROT_READ | PROT_WRITE | PROT_EXEC,
++                     MAP_PRIVATE | MAP_ANON | 0x0800, -1, 0);
++    if (rx3 != MAP_FAILED) {
++        uint8_t *rw3 = NULL;
++        if (ipatool_try_alias_rw_for_rx(rx3, pool_size, "Tier3-MAP_JIT", &rw3)) {
++            if (vm_protect(mach_task_self(), (vm_address_t)rx3, pool_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS &&
++                ipatool_dualmap_selftest(rw3, (uint8_t *)rx3, "Tier3-MAP_JIT")) {
++                ipatool_commit_pool(rw3, (uint8_t *)rx3, pool_size, slots, "Tier3-MAP_JIT");
++                pthread_mutex_unlock(&ipatool_pool_lock);
++                return 1;
++            }
++            munmap(rw3, pool_size);
++        }
++        munmap(rx3, pool_size);
++    } else {
++        fprintf(stderr, "[unicorn-ios] Tier3: mmap(MAP_JIT) refused errno=%d (%s)\n", errno, strerror(errno));
++    }
++
++    pthread_mutex_unlock(&ipatool_pool_lock);
++    return 0;
++}
++
++static void *ipatool_pool_alloc(size_t size)
++{
++    uint8_t *rw_base = __atomic_load_n(&ipatool_pool_rw_base, __ATOMIC_ACQUIRE);
++    if (rw_base == NULL || size > IPATOOL_JIT26_SLOT_SIZE) {
++        return NULL;
++    }
++    for (;;) {
++        uint32_t mask = __atomic_load_n(&ipatool_pool_used_mask, __ATOMIC_ACQUIRE);
++        int found = -1;
++        for (int i = 0; i < ipatool_pool_slots; i++) {
++            if ((mask & (1u << i)) == 0) {
++                found = i;
++                break;
++            }
++        }
++        if (found < 0) {
++            return NULL;
++        }
++        if (__atomic_compare_exchange_n(&ipatool_pool_used_mask, &mask, mask | (1u << found),
++                                        0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
++            return rw_base + ((size_t)found * IPATOOL_JIT26_SLOT_SIZE);
++        }
++    }
++}
++
++static int ipatool_pool_free(void *ptr)
++{
++    uint8_t *rw_base = __atomic_load_n(&ipatool_pool_rw_base, __ATOMIC_ACQUIRE);
++    if (rw_base == NULL || ptr == NULL) {
++        return 0;
++    }
++    uint8_t *p = (uint8_t *)ptr;
++    if (p < rw_base || p >= rw_base + ipatool_pool_size) {
++        return 0;
++    }
++    size_t offset = (size_t)(p - rw_base);
++    int idx = (int)(offset / IPATOOL_JIT26_SLOT_SIZE);
++    if (idx >= 0 && idx < ipatool_pool_slots) {
++        __atomic_fetch_and(&ipatool_pool_used_mask, ~(1u << idx), __ATOMIC_RELEASE);
++    }
++    return 1;
++}
 +
 +typedef int (*ipatool_jit_supported_fn)(void);
 +typedef void (*ipatool_jit_protect_fn)(int);
@@ -116,25 +795,22 @@
 +
 +static void ipatool_resolve_jit_fns(void)
 +{
-+    void *rtld_default = (void *)(intptr_t)-2;
-+    ipatool_supported_fn = (ipatool_jit_supported_fn)dlsym(rtld_default, "pthread_jit_write_protect_supported_np");
-+    ipatool_protect_fn = (ipatool_jit_protect_fn)dlsym(rtld_default, "pthread_jit_write_protect_np");
++    ipatool_supported_fn = (ipatool_jit_supported_fn)dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_supported_np");
++    ipatool_protect_fn = (ipatool_jit_protect_fn)dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
 +}
 +
++__attribute__((visibility("default")))
 +void ipatool_jit_write_protect(struct uc_struct *uc, int enabled)
 +{
++    TCGContext *ctx = uc->tcg_ctx;
 +    int mode = __atomic_load_n(&ipatool_jit_mode, __ATOMIC_ACQUIRE);
++    if (ctx && ctx->splitwx_diff != 0) {
++        return;
++    }
 +    if (mode == 1) {
 +        pthread_once(&ipatool_jit_once, ipatool_resolve_jit_fns);
 +        if (ipatool_supported_fn && ipatool_protect_fn && ipatool_supported_fn()) {
 +            ipatool_protect_fn(enabled);
-+        }
-+        return;
-+    }
-+    TCGContext *ctx = uc->tcg_ctx;
-+    if (mode == 4) {
-+        if (enabled && ctx && ctx->initial_buffer) {
-+            sys_icache_invalidate(ctx->initial_buffer, ctx->initial_buffer_size);
 +        }
 +        return;
 +    }
@@ -148,11 +824,7 @@
 +        }
 +    }
 +}
-+
-+#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
- static bool tb_exec_is_locked(struct uc_struct *uc)
- {
-     return uc->current_executable;
++#endif
 --- a/uc.c
 +++ b/uc.c
 @@ -35,8 +35,7 @@
@@ -165,3 +837,11 @@
  static void save_jit_state(uc_engine *uc)
  {
      if (!uc->nested) {
+@@ -58,6 +57,7 @@
+             } else {
+                 jit_write_protect(false);
+             }
++            uc->current_executable = uc->thread_executable_entry;
+         }
+     }
+     uc->nested -= 1;

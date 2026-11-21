@@ -6,6 +6,7 @@ struct DLiPA2App: App {
 
     init() {
         DebugLogger.start()
+        JITHelper.prepareStartupJIT26PoolIfNeeded()
     }
 
     var body: some Scene {
