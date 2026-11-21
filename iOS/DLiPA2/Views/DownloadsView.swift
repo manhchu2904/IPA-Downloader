@@ -51,8 +51,7 @@ struct DownloadsView: View {
                     Section {
                         HStack {
                             Label("\(filteredFiles.count) file .ipa", systemImage: "archivebox.fill")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
+                                .font(.subheadline.weight(.medium))
                             Spacer()
                             Text(ByteCountFormatter.string(fromByteCount: totalStorageBytes, countStyle: .file))
                                 .font(.subheadline)

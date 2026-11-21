@@ -181,7 +181,7 @@ final class IPAToolService: ObservableObject {
     }
 
     func search(term: String, storefrontId: String, platform: String = "iphone", limit: Int = 25) async throws -> [AppItem] {
-        guard let client else {
+        guard client != nil else {
             throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
         guard let account = selectedAccount else {
