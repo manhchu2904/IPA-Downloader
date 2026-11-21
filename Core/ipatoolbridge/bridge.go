@@ -51,8 +51,8 @@ func NewClient(baseDir string) (*Client, error) {
 	if baseDir == "" {
 		return nil, errors.New("baseDir is required")
 	}
-	if err := os.MkdirAll(filepath.Join(baseDir, "accounts"), 0o700); err != nil {
-		return nil, fmt.Errorf("create accounts dir: %w", err)
+	if err := configureSandboxEnvironment(baseDir); err != nil {
+		return nil, err
 	}
 
 	return &Client{
@@ -62,6 +62,50 @@ func NewClient(baseDir string) (*Client, error) {
 		stores:        make(map[string]appstore.AppStore),
 		activeCancels: make(map[string]context.CancelFunc),
 	}, nil
+}
+
+// configureSandboxEnvironment creates writable directories and sets HOME/XDG/TMPDIR
+// so Go stdlib helpers like os.UserCacheDir work when launched via debugserver on iOS 26+.
+func configureSandboxEnvironment(baseDir string) error {
+	cachesDir := filepath.Join(baseDir, "Library", "Caches")
+	configDir := filepath.Join(baseDir, "Library", "Application Support")
+	tmpDir := filepath.Join(baseDir, "tmp")
+
+	for _, dir := range []string{
+		filepath.Join(baseDir, "accounts"),
+		cachesDir,
+		configDir,
+		tmpDir,
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create sandbox dir: %w", err)
+		}
+	}
+
+	for key, val := range map[string]string{
+		"HOME":            baseDir,
+		"XDG_CACHE_HOME":  cachesDir,
+		"XDG_CONFIG_HOME": configDir,
+		"XDG_STATE_HOME":  baseDir,
+		"XDG_DATA_HOME":   configDir,
+	} {
+		if err := os.Setenv(key, val); err != nil {
+			return fmt.Errorf("set env %s: %w", key, err)
+		}
+	}
+
+	if os.Getenv("TMPDIR") == "" {
+		if err := os.Setenv("TMPDIR", tmpDir); err != nil {
+			return fmt.Errorf("set env TMPDIR: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// Prepare loads the compiled Store runtime profile and downloads/caches Apple's SAP assets.
+func (c *Client) Prepare() error {
+	return appstore.Prepare(context.Background())
 }
 
 func accountIDFromEmail(email string) string {
