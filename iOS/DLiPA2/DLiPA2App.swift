@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct DLiPA2App: App {
+struct IPADownloaderApp: App {
     @StateObject private var service = IPAToolService()
 
     init() {

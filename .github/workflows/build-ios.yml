@@ -1,4 +1,4 @@
-name: Build DLiPA2 iOS IPA
+name: Build IPA Downloader iOS IPA
 
 on:
   push:
@@ -73,10 +73,10 @@ jobs:
           mkdir -p dist/Payload
           cp -R "build/Build/Products/${BUILD_CONFIG}-iphoneos/DLiPA2.app" dist/Payload/
           cd dist
-          zip -r "../DLiPA2-${BUILD_CONFIG}.ipa" Payload
+          zip -r "../IPADownloader-${BUILD_CONFIG}.ipa" Payload
 
-      - name: Upload DLiPA2 IPA artifact
+      - name: Upload IPA Downloader IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DLiPA2-iOS-${{ env.BUILD_CONFIG }}-IPA
-          path: iOS/DLiPA2-${{ env.BUILD_CONFIG }}.ipa
+          name: IPADownloader-iOS-${{ env.BUILD_CONFIG }}-IPA
+          path: iOS/IPADownloader-${{ env.BUILD_CONFIG }}.ipa

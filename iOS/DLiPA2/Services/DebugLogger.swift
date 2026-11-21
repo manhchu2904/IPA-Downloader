@@ -14,7 +14,7 @@ enum DebugLogger {
         trimIfOversized()
         freopen(logURL.path, "a+", stderr)
         setvbuf(stderr, nil, _IONBF, 0)
-        log("DLiPA2 launch (JIT=\(JITHelper.isJITEnabled()), flags=\(JITHelper.codeSigningFlagsHex()))")
+        log("IPA Downloader launch (JIT=\(JITHelper.isJITEnabled()), flags=\(JITHelper.codeSigningFlagsHex()))")
     }
 
     static func log(_ message: String) {

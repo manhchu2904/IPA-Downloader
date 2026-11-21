@@ -1,4 +1,4 @@
-# DLiPA2
+# IPA Downloader
 
 Ứng dụng iOS Native (**SwiftUI**) tải file `.ipa` trực tiếp từ máy chủ chính thức của Apple, nhúng trực tiếp lõi Go mới nhất của [`majd/ipatool`](https://github.com/majd/ipatool) thông qua `gomobile` (`Ipatoolbridge.xcframework`).
 
@@ -26,17 +26,17 @@
 ├── scripts/
 │   ├── build-xcframework.sh        # Build libunicorn.a (iOS) + Ipatoolbridge.xcframework
 │   └── patches/unicorn-ios.patch   # Patch W^X cho Unicorn Engine trên iOS
-└── .github/workflows/build-ios.yml # Tự động build file DLiPA2.ipa trên macOS runner
+└── .github/workflows/build-ios.yml # Tự động build file IPADownloader.ipa trên macOS runner
 ```
 
 ---
 
-## Cách build file `DLiPA2.ipa`
+## Cách build file `IPADownloader.ipa`
 
 ### Cách 1: Tự động qua GitHub Actions (khuyên dùng nếu dùng Windows)
 1. Push thư mục dự án này lên một repository GitHub của bạn.
-2. Vào tab **Actions** → chọn workflow **Build DLiPA2 iOS IPA** → nhấn **Run workflow**.
-3. Sau khi chạy xong, tải file `DLiPA2.ipa` ở mục **Artifacts**.
+2. Vào tab **Actions** → chọn workflow **Build IPA Downloader iOS IPA** → nhấn **Run workflow**.
+3. Sau khi chạy xong, tải file `IPADownloader.ipa` ở mục **Artifacts**.
 
 ### Cách 2: Build trực tiếp trên macOS
 Yêu cầu: Xcode, Go 1.26+, `cmake`, `xcodegen`, `gomobile`.
@@ -58,4 +58,4 @@ open DLiPA2.xcodeproj
 
 1. **Ký & Cài đặt `.ipa`**: File `.ipa` xuất ra từ GitHub Actions là bản **unsigned**. Bạn có thể ký và cài đặt qua **TrollStore**, **SideStore**, **AltStore**, hoặc chứng chỉ nhà phát triển cá nhân.
 2. **Yêu cầu JIT cho SAP Signing (Unicorn Engine)**: Phiên bản mới của `majd/ipatool` sử dụng **Unicorn Engine** (`libunicorn.a`) để thực hiện bắt tay chữ ký SAP của Apple cục bộ. Khi đăng nhập trên iOS, thiết bị cần môi trường cho phép thực thi bộ nhớ W^X / JIT (ví dụ: TrollStore, máy đã Jailbreak, hoặc bật JIT qua SideStore/StikDebug).
-3. **Vị trí lưu file `.ipa`**: Các file tải về được lưu trực tiếp trong ứng dụng **Tệp (Files)** → **Trên iPhone của tôi (On My iPhone)** → **DLiPA2** → **IPAs** và có thể chia sẻ trực tiếp từ tab **Tải xuống**.
+3. **Vị trí lưu file `.ipa`**: Các file tải về được lưu trực tiếp trong ứng dụng **Tệp (Files)** → **Trên iPhone của tôi (On My iPhone)** → **IPA Downloader** → **IPAs** và có thể chia sẻ trực tiếp từ tab **Tải xuống**.

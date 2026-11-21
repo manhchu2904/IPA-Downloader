@@ -35,7 +35,11 @@ final class IPAToolService: ObservableObject {
     init() {
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            let baseDir = appSupport.appendingPathComponent("DLiPA2Core", isDirectory: true)
+            let baseDir = appSupport.appendingPathComponent("IPADownloaderCore", isDirectory: true)
+            let oldBaseDir = appSupport.appendingPathComponent("DLiPA2Core", isDirectory: true)
+            if !FileManager.default.fileExists(atPath: baseDir.path), FileManager.default.fileExists(atPath: oldBaseDir.path) {
+                try? FileManager.default.moveItem(at: oldBaseDir, to: baseDir)
+            }
             try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
 
             let cacheFile = baseDir.appendingPathComponent("version_metadata_cache.json")
@@ -53,7 +57,7 @@ final class IPAToolService: ObservableObject {
 
             var err: NSError?
             guard let initialized = IpatoolbridgeNewClient(baseDir.path, &err) else {
-                throw err ?? NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Go core"])
+                throw err ?? NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Go core"])
             }
             self.client = initialized
 
@@ -100,7 +104,7 @@ final class IPAToolService: ObservableObject {
 
     func login(email: String, password: String, authCode: String) async throws -> LoginResponse {
         guard let client else {
-            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
         JITHelper.prepareStartupJIT26PoolIfNeeded()
         DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) poolReady=\(JITHelper.isJITPoolReady()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
@@ -141,10 +145,10 @@ final class IPAToolService: ObservableObject {
 
     func search(term: String, storefrontId: String, platform: String = "iphone", limit: Int = 25) async throws -> [AppItem] {
         guard let client else {
-            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
         guard let account = selectedAccount else {
-            throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
+            throw NSError(domain: "IPADownloader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
         let json = try await runBridge { errPtr in
             client.search(account.id, term: term, storefrontOverride: storefrontId, platformName: platform, limit: limit, error: errPtr)
@@ -220,10 +224,10 @@ final class IPAToolService: ObservableObject {
 
     func listVersions(for app: AppItem, platform: String = "iphone") async throws -> VersionHistory {
         guard let client else {
-            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
         guard let account = selectedAccount else {
-            throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
+            throw NSError(domain: "IPADownloader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
         let json = try await runBridge { errPtr in
             client.listVersions(account.id, appID: app.id, bundleID: app.bundleId, price: app.price, platformName: platform, purchaseIfNeeded: true, error: errPtr)
@@ -243,10 +247,10 @@ final class IPAToolService: ObservableObject {
             return cached
         }
         guard let client else {
-            throw NSError(domain: "DLiPA2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
         guard let account = selectedAccount else {
-            throw NSError(domain: "DLiPA2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
+            throw NSError(domain: "IPADownloader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
         let json = try await runBridge { errPtr in
             client.getVersionMetadata(account.id, appID: app.id, bundleID: app.bundleId, versionID: versionId, platformName: platform, error: errPtr)
