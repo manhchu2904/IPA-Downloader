@@ -52,14 +52,23 @@ func (c *Client) ListVersions(accountID string, appID int64, bundleID string, pr
 		App:      app,
 		Platform: platform,
 	})
+	if errors.Is(err, appstore.ErrPasswordTokenExpired) {
+		if refreshed, rErr := c.refreshAccountToken(st, acc); rErr == nil {
+			acc = refreshed
+			out, err = st.ListVersions(appstore.ListVersionsInput{
+				Context:  ctx,
+				Account:  acc,
+				App:      app,
+				Platform: platform,
+			})
+		}
+	}
 	if err != nil && errors.Is(err, appstore.ErrLicenseRequired) && purchaseIfNeeded && price == 0 {
-		if pErr := st.Purchase(appstore.PurchaseInput{
-			Account:  acc,
-			App:      app,
-			Platform: platform,
-		}); pErr != nil && !errors.Is(pErr, appstore.ErrLicenseAlreadyExists) {
+		updatedAcc, pErr := c.acquireFreeLicense(st, acc, app, platform)
+		if pErr != nil {
 			return "", fmt.Errorf("failed to acquire free license: %w", pErr)
 		}
+		acc = updatedAcc
 		out, err = st.ListVersions(appstore.ListVersionsInput{
 			Context:  ctx,
 			Account:  acc,
@@ -102,6 +111,18 @@ func (c *Client) GetVersionMetadata(accountID string, appID int64, bundleID, ver
 		VersionID: versionID,
 		Platform:  platform,
 	})
+	if errors.Is(err, appstore.ErrPasswordTokenExpired) {
+		if refreshed, rErr := c.refreshAccountToken(st, acc); rErr == nil {
+			acc = refreshed
+			out, err = st.GetVersionMetadata(appstore.GetVersionMetadataInput{
+				Context:   ctx,
+				Account:   acc,
+				App:       appstore.App{ID: appID, BundleID: bundleID},
+				VersionID: versionID,
+				Platform:  platform,
+			})
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("get version metadata failed: %w", err)
 	}

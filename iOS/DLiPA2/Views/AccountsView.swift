@@ -32,7 +32,7 @@ struct AccountsView: View {
                         .buttonStyle(.borderless)
                     }
                     if !jitEnabled {
-                        Text("Hãy mở DLiPA2 qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
+                        Text("Hãy mở IPA Downloader qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -112,6 +112,67 @@ struct AccountsView: View {
                 } footer: {
                     Text("Thông tin đăng nhập được lưu cục bộ trên thiết bị và chỉ giao tiếp trực tiếp với máy chủ Apple.")
                 }
+
+                Section {
+                    HStack {
+                        Label("Phiên bản", systemImage: "app.badge.checkmark")
+                        Spacer()
+                        Text("v\(appVersion) (Build \(appBuild))")
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Label("Core Engine", systemImage: "cpu")
+                        Spacer()
+                        Text("ipatool v2 • Unicorn 2.1.4")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Label("Cơ chế JIT", systemImage: "memorychip")
+                        Spacer()
+                        Text("Split-W^X Dual-Map (iOS \(UIDevice.current.systemVersion))")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let repoURL = URL(string: "https://github.com/manhchu2904/IPA-Downloader") {
+                        Link(destination: repoURL) {
+                            HStack {
+                                Label("Mã nguồn (GitHub)", systemImage: "chevron.left.forwardslash.chevron.right")
+                                Spacer()
+                                Text("manhchu2904/IPA-Downloader")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if let ipatoolURL = URL(string: "https://github.com/majd/ipatool") {
+                        Link(destination: ipatoolURL) {
+                            HStack {
+                                Label("Lõi ipatool gốc", systemImage: "shippingbox")
+                                Spacer()
+                                Text("majd/ipatool")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Thông tin & Mã nguồn")
+                } footer: {
+                    Text("IPA Downloader • Tải trực tiếp file .ipa nguyên bản từ máy chủ App Store của Apple.")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 4)
+                }
             }
             .navigationTitle("Tài khoản")
             .toolbar {
@@ -146,6 +207,14 @@ struct AccountsView: View {
         .navigationViewStyle(.stack)
     }
 
+    private var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+    }
+
+    private var appBuild: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "1"
+    }
+
     private func refreshJITState() {
         JITHelper.prepareStartupJIT26PoolIfNeeded()
         jitEnabled = JITHelper.isJITEnabled()
@@ -164,26 +233,66 @@ private struct AddAccountSheet: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
+    private var isEmailFormatValid: Bool {
+        Self.isValidAppleID(email)
+    }
+
+    private var isTwoFactorCodeValid: Bool {
+        let cleaned = authCode.filter { !$0.isWhitespace }
+        return cleaned.count == 6 && cleaned.allSatisfy { $0.isNumber && $0.isASCII }
+    }
+
+    private var canSubmitLogin: Bool {
+        guard !isLoading, isEmailFormatValid, !password.isEmpty else {
+            return false
+        }
+        if needsTwoFactor {
+            return isTwoFactorCodeValid
+        }
+        return true
+    }
+
     var body: some View {
         NavigationView {
             Form {
                 if !JITHelper.isJITEnabled() {
                     Section {
-                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở DLiPA2 qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
+                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở IPA Downloader qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
                             .font(.footnote)
                     }
                 }
 
-                Section("Thông tin Apple ID") {
-                    TextField("Email Apple ID", text: $email)
+                Section {
+                    TextField("Email hoặc SĐT Apple ID", text: $email)
                         .keyboardType(.emailAddress)
                         .textContentType(.username)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                        .onChange(of: email) { _ in
+                            if needsTwoFactor {
+                                needsTwoFactor = false
+                                authCode = ""
+                            }
+                            errorMessage = nil
+                        }
 
                     SecureField("Mật khẩu", text: $password)
                         .textContentType(.password)
+                        .onChange(of: password) { _ in
+                            if needsTwoFactor {
+                                needsTwoFactor = false
+                                authCode = ""
+                            }
+                            errorMessage = nil
+                        }
+                } header: {
+                    Text("Thông tin Apple ID")
+                } footer: {
+                    if !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isEmailFormatValid {
+                        Text("Nhập đúng định dạng email (vd: ten@icloud.com) hoặc số điện thoại để bật nút Đăng nhập.")
+                            .foregroundColor(.orange)
+                    }
                 }
 
                 if needsTwoFactor {
@@ -191,10 +300,17 @@ private struct AddAccountSheet: View {
                         TextField("Mã xác thực 6 chữ số", text: $authCode)
                             .keyboardType(.numberPad)
                             .textContentType(.oneTimeCode)
+
+                        Button("Nhập lại Email / Mật khẩu") {
+                            needsTwoFactor = false
+                            authCode = ""
+                            errorMessage = nil
+                        }
+                        .font(.footnote)
                     } header: {
                         Text("Xác thực 2 yếu tố (2FA)")
                     } footer: {
-                        Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn.")
+                        Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn.\nLưu ý: Máy chủ App Store của Apple trả về cùng một mã phản hồi cho cả trường hợp cần 2FA lẫn khi nhập sai Email/Mật khẩu. Nếu thiết bị của bạn không hiện mã 2FA, hãy kiểm tra lại Email và Mật khẩu.")
                     }
                 }
 
@@ -221,7 +337,7 @@ private struct AddAccountSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+                    .disabled(!canSubmitLogin)
                 }
             }
             .navigationTitle("Thêm Apple ID")
@@ -234,14 +350,59 @@ private struct AddAccountSheet: View {
         }
     }
 
+    private static func isValidAppleID(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: { $0.isWhitespace }) else {
+            return false
+        }
+        if let atIndex = trimmed.firstIndex(of: "@") {
+            let local = trimmed[..<atIndex]
+            let domain = trimmed[trimmed.index(after: atIndex)...]
+            guard !local.isEmpty,
+                  !domain.contains("@"),
+                  let dotIndex = domain.lastIndex(of: "."),
+                  dotIndex > domain.startIndex,
+                  dotIndex < domain.index(before: domain.endIndex) else {
+                return false
+            }
+            return true
+        }
+        var digits = 0
+        for (idx, ch) in trimmed.enumerated() {
+            if ch.isNumber && ch.isASCII {
+                digits += 1
+            } else if ch == "+" && idx == 0 {
+                continue
+            } else if ch == "-" || ch == "(" || ch == ")" {
+                continue
+            } else {
+                return false
+            }
+        }
+        return digits >= 7
+    }
+
     private func performLogin() {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidAppleID(trimmedEmail) else {
+            errorMessage = "Apple ID không đúng định dạng. Vui lòng nhập email hợp lệ (ví dụ: ten@icloud.com) hoặc số điện thoại."
+            return
+        }
+        if needsTwoFactor {
+            let cleanedCode = authCode.filter { !$0.isWhitespace }
+            guard cleanedCode.count == 6, cleanedCode.allSatisfy({ $0.isNumber && $0.isASCII }) else {
+                errorMessage = "Vui lòng nhập đúng mã 2FA gồm 6 chữ số."
+                return
+            }
+        }
+
         isLoading = true
         errorMessage = nil
 
         Task {
             defer { isLoading = false }
             do {
-                let res = try await service.login(email: email, password: password, authCode: authCode)
+                let res = try await service.login(email: trimmedEmail, password: password, authCode: authCode)
                 if res.authCodeRequired {
                     needsTwoFactor = true
                 } else if res.success {

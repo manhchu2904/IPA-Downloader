@@ -1,12 +1,21 @@
 import SwiftUI
+import UIKit
 
 @main
-struct DLiPA2App: App {
+struct IPADownloaderApp: App {
     @StateObject private var service = IPAToolService()
 
     init() {
+        Self.configureBarAppearances()
         DebugLogger.start()
         JITHelper.prepareStartupJIT26PoolIfNeeded()
+    }
+
+    private static func configureBarAppearances() {
+        let tabBarAppearance = UITabBarAppearance()
+        tabBarAppearance.configureWithDefaultBackground()
+        UITabBar.appearance().standardAppearance = tabBarAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
     }
 
     var body: some Scene {

@@ -160,6 +160,49 @@ func (c *Client) loadAccount(accountID string) (appstore.AppStore, appstore.Acco
 	return st, info.Account, nil
 }
 
+// refreshAccountToken silently re-authenticates using the stored credentials in keychain.json
+// when Apple reports ErrPasswordTokenExpired (matching majd/ipatool CLI retry behavior).
+func (c *Client) refreshAccountToken(st appstore.AppStore, acc appstore.Account) (appstore.Account, error) {
+	if acc.Email == "" || acc.Password == "" {
+		return acc, appstore.ErrPasswordTokenExpired
+	}
+	out, err := st.Login(appstore.LoginInput{
+		Email:    acc.Email,
+		Password: acc.Password,
+	})
+	if err != nil {
+		return acc, err
+	}
+	return out.Account, nil
+}
+
+// acquireFreeLicense obtains a free license for app, automatically refreshing the password token
+// if expired and reloading any server-corrected storefront from AccountInfo.
+func (c *Client) acquireFreeLicense(st appstore.AppStore, acc appstore.Account, app appstore.App, platform appstore.Platform) (appstore.Account, error) {
+	pErr := st.Purchase(appstore.PurchaseInput{
+		Account:  acc,
+		App:      app,
+		Platform: platform,
+	})
+	if errors.Is(pErr, appstore.ErrPasswordTokenExpired) {
+		if refreshed, rErr := c.refreshAccountToken(st, acc); rErr == nil {
+			acc = refreshed
+			pErr = st.Purchase(appstore.PurchaseInput{
+				Account:  acc,
+				App:      app,
+				Platform: platform,
+			})
+		}
+	}
+	if pErr != nil && !errors.Is(pErr, appstore.ErrLicenseAlreadyExists) {
+		return acc, pErr
+	}
+	if info, err := st.AccountInfo(); err == nil {
+		acc = info.Account
+	}
+	return acc, nil
+}
+
 func toAccountDTO(id string, acc appstore.Account) AccountDTO {
 	return AccountDTO{
 		ID:                  id,
@@ -171,12 +214,47 @@ func toAccountDTO(id string, acc appstore.Account) AccountDTO {
 	}
 }
 
+func validateAppleIDInput(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.ContainsAny(trimmed, " \t\r\n") {
+		return errors.New("Apple ID không hợp lệ (vui lòng nhập đúng định dạng email hoặc số điện thoại)")
+	}
+	if at := strings.IndexByte(trimmed, '@'); at > 0 {
+		local := trimmed[:at]
+		domain := trimmed[at+1:]
+		dot := strings.LastIndexByte(domain, '.')
+		if len(local) > 0 && dot > 0 && dot < len(domain)-1 && !strings.Contains(domain, "@") {
+			return nil
+		}
+		return errors.New("Email Apple ID không đúng định dạng (ví dụ: ten@icloud.com)")
+	}
+	// Phone-number Apple ID: must consist of digits (and optional '+', '-', '(', ')') with >= 7 digits
+	digits := 0
+	for i, r := range trimmed {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r == '+' && i == 0:
+		case r == '-' || r == '(' || r == ')':
+		default:
+			return errors.New("Apple ID phải là địa chỉ email hợp lệ (có @) hoặc số điện thoại")
+		}
+	}
+	if digits < 7 {
+		return errors.New("Apple ID phải là địa chỉ email hợp lệ hoặc số điện thoại đủ chữ số")
+	}
+	return nil
+}
+
 // Login authenticates an Apple ID (with optional 6-digit 2FA authCode).
 // Returns JSON-encoded LoginResponseDTO.
 func (c *Client) Login(email, password, authCode string) (string, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || password == "" {
 		return "", errors.New("email and password are required")
+	}
+	if err := validateAppleIDInput(email); err != nil {
+		return "", err
 	}
 
 	id := accountIDFromEmail(email)
@@ -198,6 +276,12 @@ func (c *Client) Login(email, password, authCode string) (string, error) {
 			}
 			b, _ := json.Marshal(resp)
 			return string(b), nil
+		}
+		if _, infoErr := st.AccountInfo(); infoErr != nil {
+			c.mu.Lock()
+			delete(c.stores, id)
+			c.mu.Unlock()
+			_ = os.RemoveAll(c.accountDir(id))
 		}
 		return "", err
 	}
