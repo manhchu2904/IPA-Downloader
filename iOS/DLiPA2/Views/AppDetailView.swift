@@ -12,7 +12,6 @@ struct AppDetailView: View {
     @State private var isLoadingVersions = false
     @State private var loadingVersionId: String?
     @State private var versionFilterText: String = ""
-    @State private var displayedVersionLimit: Int = 10
     @State private var showManualVersionAlert = false
     @State private var manualVersionIdInput: String = ""
     @State private var errorMessage: String?
@@ -66,15 +65,35 @@ struct AppDetailView: View {
                 LabeledContentRow(title: "Phiên bản mới nhất", value: "v\(app.version)")
 
                 if service.accounts.count > 1 {
-                    Picker("Apple ID tải về", selection: Binding(
-                        get: { service.selectedAccountId ?? service.accounts.first?.id ?? "" },
-                        set: { service.selectedAccountId = $0 }
-                    )) {
-                        ForEach(service.accounts) { account in
-                            Text("\(account.email) (\(account.storefrontCountryCode))").tag(account.id)
+                    HStack {
+                        Text("Apple ID tải về")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer(minLength: 12)
+                        Menu {
+                            ForEach(service.accounts) { account in
+                                Button {
+                                    service.selectedAccountId = account.id
+                                } label: {
+                                    HStack {
+                                        Text("\(account.email) (\(account.storefrontCountryCode))")
+                                        if account.id == service.selectedAccount?.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(activeAccountEmail)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                            }
                         }
                     }
-                    .font(.subheadline)
                 } else {
                     LabeledContentRow(title: "Apple ID tải về", value: activeAccountEmail)
                 }
@@ -130,13 +149,9 @@ struct AppDetailView: View {
                                     .font(.subheadline)
                                     .autocapitalization(.none)
                                     .disableAutocorrection(true)
-                                    .onChange(of: versionFilterText) { _ in
-                                        displayedVersionLimit = 10
-                                    }
                                 if !versionFilterText.isEmpty {
                                     Button {
                                         versionFilterText = ""
-                                        displayedVersionLimit = 10
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .foregroundColor(.secondary)
@@ -152,27 +167,8 @@ struct AppDetailView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         } else {
-                            let slicedIds = Array(visibleIds.prefix(displayedVersionLimit))
-                            ForEach(slicedIds, id: \.self) { vid in
+                            ForEach(visibleIds, id: \.self) { vid in
                                 versionRow(vid: vid, latestId: history.latestVersionId)
-                            }
-
-                            if visibleIds.count > displayedVersionLimit {
-                                let remaining = visibleIds.count - displayedVersionLimit
-                                let nextStep = min(10, remaining)
-                                Button {
-                                    displayedVersionLimit += 10
-                                } label: {
-                                    HStack {
-                                        Spacer()
-                                        Image(systemName: "chevron.down.circle.fill")
-                                        Text("Xem thêm \(nextStep) phiên bản (đang hiện \(slicedIds.count)/\(visibleIds.count))")
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 4)
-                                }
                             }
                         }
                     }
@@ -336,7 +332,6 @@ struct AppDetailView: View {
     private func loadVersions() {
         isLoadingVersions = true
         errorMessage = nil
-        displayedVersionLimit = 10
         Task {
             defer { isLoadingVersions = false }
             let publicDir = await service.fetchPublicVersionDirectory(appId: app.id, platform: platform)

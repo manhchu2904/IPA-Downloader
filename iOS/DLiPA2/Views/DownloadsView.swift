@@ -61,14 +61,46 @@ struct DownloadsView: View {
                         }
 
                         if availableAccountGroups.count > 1 || selectedAccountFilter != "ALL" {
-                            Picker("Lọc theo Apple ID", selection: $selectedAccountFilter) {
-                                Text("Tất cả Apple ID (\(service.downloadedFiles.count))").tag("ALL")
-                                ForEach(availableAccountGroups, id: \.self) { email in
-                                    let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
-                                    Text("\(email) (\(count))").tag(email)
+                            HStack {
+                                Text("Lọc theo Apple ID")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer(minLength: 12)
+                                Menu {
+                                    Button {
+                                        selectedAccountFilter = "ALL"
+                                    } label: {
+                                        HStack {
+                                            Text("Tất cả Apple ID (\(service.downloadedFiles.count))")
+                                            if selectedAccountFilter == "ALL" {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                    ForEach(availableAccountGroups, id: \.self) { email in
+                                        let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
+                                        Button {
+                                            selectedAccountFilter = email
+                                        } label: {
+                                            HStack {
+                                                Text("\(email) (\(count))")
+                                                if selectedAccountFilter == email {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text(selectedAccountFilter == "ALL" ? "Tất cả (\(service.downloadedFiles.count))" : selectedAccountFilter)
+                                            .font(.subheadline)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.85)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption)
+                                    }
                                 }
                             }
-                            .font(.subheadline)
                         }
                     }
                 }

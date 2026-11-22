@@ -115,11 +115,42 @@ struct AccountsView: View {
                 }
 
                 Section {
-                    Picker("Phương thức cài đặt", selection: $otaUseLocalHTTPS) {
-                        Text("Trực tiếp (Không cần chứng chỉ)").tag(false)
-                        Text("HTTPS Cục bộ (127.0.0.1 / Offline)").tag(true)
+                    HStack {
+                        Label("Phương thức cài đặt", systemImage: "iphone.and.arrow.forward")
+                            .font(.subheadline)
+                        Spacer()
+                        Menu {
+                            Button {
+                                otaUseLocalHTTPS = false
+                            } label: {
+                                HStack {
+                                    Text("Trực tiếp (Không cần chứng chỉ)")
+                                    if !otaUseLocalHTTPS {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            Button {
+                                otaUseLocalHTTPS = true
+                            } label: {
+                                HStack {
+                                    Text("HTTPS Cục bộ (127.0.0.1 / Offline)")
+                                    if otaUseLocalHTTPS {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(otaUseLocalHTTPS ? "HTTPS Cục bộ (127.0.0.1)" : "Trực tiếp")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
-                    .font(.subheadline)
 
                     if otaUseLocalHTTPS {
                         Button {
