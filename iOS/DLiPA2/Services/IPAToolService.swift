@@ -583,6 +583,19 @@ final class IPAToolService: ObservableObject {
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
     }
 
+    func startCACertServer() async throws -> URL {
+        guard let client else {
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
+        let urlStr = try await runBridge { errPtr in
+            client.startCACertServer(errPtr)
+        }
+        guard let url = URL(string: urlStr) else {
+            throw NSError(domain: "IPADownloader", code: -3, userInfo: [NSLocalizedDescriptionKey: "Invalid CA certificate URL"])
+        }
+        return url
+    }
+
     // MARK: - Helpers
 
     private func runBridge(_ work: @escaping (NSErrorPointer) -> String) async throws -> String {

@@ -475,58 +475,39 @@ private struct IPAInstallerSheet: View {
     @State private var session: InstallSession?
     @State private var isStarting = true
     @State private var errorMessage: String?
-    @State private var useLocalHTTPSMode = false
+    @AppStorage("otaUseLocalHTTPS") private var useLocalHTTPSMode = false
+
+    private func infoRow(title: String, value: String, bold: Bool = false) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(bold ? .semibold : .regular)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
 
     var body: some View {
         NavigationView {
             List {
                 Section("Thông tin gói .ipa") {
                     if let session {
-                        HStack {
-                            Text("Ứng dụng")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(session.appName)
-                                .fontWeight(.semibold)
-                        }
-                        HStack {
-                            Text("Bundle ID")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(session.bundleId)
-                                .font(.caption)
-                        }
-                        HStack {
-                            Text("Phiên bản")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("v\(session.version)")
-                        }
+                        infoRow(title: "Ứng dụng", value: session.appName, bold: true)
+                        infoRow(title: "Bundle ID", value: session.bundleId)
+                        infoRow(title: "Phiên bản", value: "v\(session.version)")
                     } else {
-                        HStack {
-                            Text("Tên file")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(file.name)
-                                .font(.caption)
-                        }
+                        infoRow(title: "Tên file", value: file.name)
                     }
-                    HStack {
-                        Text("Dung lượng")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(file.formattedSize)
-                    }
-                    HStack {
-                        Text("Apple ID bản quyền")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(file.accountEmail)
-                            .font(.caption)
-                    }
+                    infoRow(title: "Dung lượng", value: file.formattedSize)
+                    infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
+                    infoRow(title: "Chế độ OTA", value: useLocalHTTPSMode ? "HTTPS Cục bộ (127.0.0.1)" : "Trực tiếp")
                 }
 
-                Section("Trạng thái cài đặt OTA") {
+                Section {
                     if isStarting {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -537,7 +518,7 @@ private struct IPAInstallerSheet: View {
                     } else if let errorMessage {
                         Text(errorMessage)
                             .foregroundColor(.red)
-                            .font(.footnote)
+                            .font(.subheadline)
                     } else if let session {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
@@ -558,11 +539,11 @@ private struct IPAInstallerSheet: View {
                                 ProgressView(value: min(max(service.installPercent, 0), 1))
                                 HStack {
                                     Text("\(Int(min(max(service.installPercent, 0), 1) * 100))%")
-                                        .font(.caption2)
+                                        .font(.caption)
                                         .fontWeight(.semibold)
                                     Spacer()
                                     Text("\(ByteCountFormatter.string(fromByteCount: service.installSentBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: max(service.installTotalBytes, session.fileSize), countStyle: .file))")
-                                        .font(.caption2)
+                                        .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
                             }
@@ -576,6 +557,7 @@ private struct IPAInstallerSheet: View {
                                 Spacer()
                                 Image(systemName: "arrow.down.app.fill")
                                 Text("Hiện hộp thoại Cài đặt iOS")
+                                    .font(.subheadline)
                                     .fontWeight(.semibold)
                                 Spacer()
                             }
@@ -591,32 +573,10 @@ private struct IPAInstallerSheet: View {
                                 .font(.subheadline)
                         }
                     }
-                }
-
-                if let session {
-                    Section {
-                        Picker("Phương thức Manifest", selection: $useLocalHTTPSMode) {
-                            Text("Trực tiếp (Không cần chứng chỉ)").tag(false)
-                            Text("HTTPS Cục bộ (DLiPA / Offline)").tag(true)
-                        }
-
-                        if useLocalHTTPSMode {
-                            Button {
-                                if let url = URL(string: session.caCertUrl) {
-                                    UIApplication.shared.open(url)
-                                }
-                            } label: {
-                                Label("Tải chứng chỉ CA cục bộ (Cài đặt > Đã tải về hồ sơ)", systemImage: "checkmark.shield")
-                                    .font(.footnote)
-                            }
-                        }
-                    } header: {
-                        Text("Chế độ máy chủ OTA")
-                    } footer: {
-                        Text(useLocalHTTPSMode
-                             ? "Chế độ HTTPS Cục bộ (https://127.0.0.1) hoạt động 100% offline không cần DNS ngoài. Lần đầu sử dụng chế độ này, hãy bấm 'Tải chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
-                             : "Chế độ Trực tiếp không cần cài chứng chỉ CA. Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong).")
-                    }
+                } header: {
+                    Text("Trạng thái cài đặt OTA")
+                } footer: {
+                    Text("Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong). Có thể đổi phương thức cài đặt trong tab Tài khoản.")
                 }
             }
             .navigationTitle("Cài đặt vào máy")

@@ -351,6 +351,41 @@ func (c *Client) StopIPAInstaller() {
 	}
 }
 
+// StartCACertServer launches a lightweight local HTTP server on 127.0.0.1 to serve the local Root CA certificate for Safari profile installation.
+func (c *Client) StartCACertServer() (string, error) {
+	c.StopIPAInstaller()
+
+	caCertDER, _, err := c.ensureInstallerCertificates()
+	if err != nil {
+		return "", fmt.Errorf("prepare installer CA certificate: %w", err)
+	}
+
+	httpLn, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		return "", fmt.Errorf("listen local HTTP: %w", err)
+	}
+	httpPort := httpLn.Addr().(*net.TCPAddr).Port
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA.crt\"")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(caCertDER)
+	})
+
+	httpSrv := &http.Server{Handler: mux}
+	installerMu.Lock()
+	activeHTTPServer = httpSrv
+	installerMu.Unlock()
+
+	go func() {
+		_ = httpSrv.Serve(httpLn)
+	}()
+
+	return fmt.Sprintf("http://127.0.0.1:%d/ca.crt", httpPort), nil
+}
+
 type progressResponseWriter struct {
 	http.ResponseWriter
 	total      int64
