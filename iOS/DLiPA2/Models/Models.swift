@@ -94,8 +94,10 @@ struct InstallSession: Codable, Identifiable {
     let fileSize: Int64
     let httpPort: Int
     let httpsPort: Int
+    let httpsHost: String?
     let directItmsUrl: String
     let localHttpsItmsUrl: String
+    let localHttpsFallbackItmsUrl: String?
     let safariInstallUrl: String
     let caCertUrl: String
 }

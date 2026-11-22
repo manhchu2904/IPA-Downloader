@@ -25,7 +25,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
-      KEEP_LATEST: ${{ inputs.keep_latest || '5' }}
+      KEEP_LATEST: ${{ inputs.keep_latest != '' && inputs.keep_latest || '3' }}
       OBSOLETE_ONLY: ${{ inputs.delete_obsolete_only || 'false' }}
       CURRENT_RUN_ID: ${{ github.run_id }}
 
@@ -37,51 +37,80 @@ jobs:
         run: |
           set -euo pipefail
 
+          if ! [[ "$KEEP_LATEST" =~ ^[0-9]+$ ]]; then
+            echo "Error: keep_latest phải là số nguyên >= 0 (nhận được: '$KEEP_LATEST')" >&2
+            exit 1
+          fi
+
           echo "==> Repository: $REPO"
           echo "==> Keep latest per active workflow: $KEEP_LATEST"
           echo "==> Delete obsolete/failed only: $OBSOLETE_ONLY"
 
-          # 1. Xóa toàn bộ lượt chạy của các workflow đã bị xóa khỏi thư mục .github/workflows/
-          ACTIVE_PATHS=$(find .github/workflows -maxdepth 1 \( -name "*.yml" -o -name "*.yaml" \) | sed 's|^\./||')
+          ACTIVE_PATHS=$(find .github/workflows -maxdepth 1 \( -name "*.yml" -o -name "*.yaml" \) | sed 's|^\./||' | sort)
+          echo "==> Active workflow files:"
+          echo "$ACTIVE_PATHS"
 
-          gh api "repos/${REPO}/actions/workflows" --paginate -q '.workflows[] | "\(.id)|\(.path)|\(.name)"' | while IFS='|' read -r WF_ID WF_PATH WF_NAME; do
-            if ! echo "$ACTIVE_PATHS" | grep -qx "$WF_PATH"; then
-              echo "==> Phát hiện workflow cũ không còn tồn tại: $WF_NAME ($WF_PATH) -> Đang xóa toàn bộ lịch sử..."
-              gh api "repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=100" --paginate -q '.workflow_runs[].id' | while read -r RUN_ID; do
-                if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "$CURRENT_RUN_ID" ]; then
-                  echo "   Deleting obsolete workflow run #$RUN_ID ($WF_NAME)"
-                  gh api -X DELETE "repos/${REPO}/actions/runs/${RUN_ID}" || true
-                fi
-              done
+          # Lấy toàn bộ runs qua /actions/runs (vì /actions/workflows không trả về các workflow đã bị xóa)
+          # và lưu ra file trước khi xóa để tránh lệch trang (pagination shift) khi đang xóa.
+          RUNS_FILE=$(mktemp)
+          trap 'rm -f "$RUNS_FILE"' EXIT
+
+          gh api "repos/${REPO}/actions/runs?per_page=100" --paginate \
+            | jq -s -r '[.[].workflow_runs[]] | sort_by(.created_at) | reverse | .[] | "\(.id)|\(.path // "")|\(.status // "")|\(.conclusion // "")|\(.name // "")"' \
+            > "$RUNS_FILE"
+
+          TOTAL_RUNS=$(wc -l < "$RUNS_FILE" | tr -d ' ')
+          echo "==> Tổng số workflow runs tìm thấy: $TOTAL_RUNS"
+
+          declare -A KEEP_COUNT=()
+          DELETED=0
+          FAILED=0
+          SKIPPED=0
+
+          delete_run() {
+            local run_id="$1"
+            local reason="$2"
+            echo "   Deleting run #${run_id} (${reason})"
+            if gh api -X DELETE "repos/${REPO}/actions/runs/${run_id}" </dev/null >/dev/null; then
+              DELETED=$((DELETED + 1))
+            else
+              echo "   [WARN] Không thể xóa run #${run_id}" >&2
+              FAILED=$((FAILED + 1))
             fi
-          done
+          }
 
-          # 2. Dọn dẹp các lượt chạy cũ của các workflow hiện hành
-          gh api "repos/${REPO}/actions/workflows" --paginate -q '.workflows[] | "\(.id)|\(.path)|\(.name)"' | while IFS='|' read -r WF_ID WF_PATH WF_NAME; do
-            if echo "$ACTIVE_PATHS" | grep -qx "$WF_PATH"; then
-              echo "==> Đang kiểm tra workflow: $WF_NAME ($WF_PATH)"
-              COUNT=0
-              gh api "repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=100" --paginate -q '.workflow_runs[] | "\(.id)|\(.status)|\(.conclusion)"' | while IFS='|' read -r RUN_ID STATUS CONCLUSION; do
-                if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "$CURRENT_RUN_ID" ] || [ "$STATUS" != "completed" ]; then
-                  continue
-                fi
-
-                # Luôn xóa các lượt chạy bị lỗi (failure), bị hủy (cancelled) hoặc bỏ qua (skipped)
-                if [ "$CONCLUSION" = "failure" ] || [ "$CONCLUSION" = "cancelled" ] || [ "$CONCLUSION" = "skipped" ] || [ "$CONCLUSION" = "timed_out" ]; then
-                  echo "   Deleting failed/cancelled run #$RUN_ID ($WF_NAME - $CONCLUSION)"
-                  gh api -X DELETE "repos/${REPO}/actions/runs/${RUN_ID}" || true
-                  continue
-                fi
-
-                if [ "$OBSOLETE_ONLY" = "true" ]; then
-                  continue
-                fi
-
-                COUNT=$((COUNT + 1))
-                if [ "$COUNT" -gt "$KEEP_LATEST" ]; then
-                  echo "   Deleting old run #$RUN_ID ($WF_NAME - vượt quá giới hạn giữ lại $KEEP_LATEST bản)"
-                  gh api -X DELETE "repos/${REPO}/actions/runs/${RUN_ID}" || true
-                fi
-              done
+          while IFS='|' read -r RUN_ID RUN_PATH STATUS CONCLUSION WF_NAME; do
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "$CURRENT_RUN_ID" ] || [ "$STATUS" != "completed" ]; then
+              SKIPPED=$((SKIPPED + 1))
+              continue
             fi
-          done
+
+            # 1. Xóa toàn bộ lượt chạy của các workflow đã bị xóa khỏi .github/workflows/
+            if [ -z "$RUN_PATH" ] || ! printf '%s\n' "$ACTIVE_PATHS" | grep -Fxq "$RUN_PATH"; then
+              delete_run "$RUN_ID" "obsolete workflow: ${WF_NAME} (${RUN_PATH:-unknown})"
+              continue
+            fi
+
+            # 2. Luôn xóa các lượt chạy bị lỗi (failure), bị hủy (cancelled), bỏ qua (skipped) hoặc timeout
+            if [ "$CONCLUSION" = "failure" ] || [ "$CONCLUSION" = "cancelled" ] || [ "$CONCLUSION" = "skipped" ] || [ "$CONCLUSION" = "timed_out" ] || [ "$CONCLUSION" = "startup_failure" ]; then
+              delete_run "$RUN_ID" "${WF_NAME} - ${CONCLUSION}"
+              continue
+            fi
+
+            if [ "$OBSOLETE_ONLY" = "true" ]; then
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            # 3. Giữ lại tối đa KEEP_LATEST lượt chạy mới nhất cho mỗi workflow hiện hành
+            COUNT=$(( ${KEEP_COUNT["$RUN_PATH"]:-0} + 1 ))
+            KEEP_COUNT["$RUN_PATH"]=$COUNT
+
+            if [ "$COUNT" -gt "$KEEP_LATEST" ]; then
+              delete_run "$RUN_ID" "${WF_NAME} - vượt quá giới hạn giữ lại ${KEEP_LATEST} bản (#${COUNT})"
+            else
+              SKIPPED=$((SKIPPED + 1))
+            fi
+          done < "$RUNS_FILE"
+
+          echo "==> Hoàn tất: đã xóa ${DELETED}, giữ lại/bỏ qua ${SKIPPED}, lỗi ${FAILED}."

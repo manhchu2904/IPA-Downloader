@@ -134,7 +134,7 @@ struct AccountsView: View {
                                 otaUseLocalHTTPS = true
                             } label: {
                                 HStack {
-                                    Text("HTTPS Cục bộ (localhost / Offline)")
+                                    Text("HTTPS Cục bộ (Offline)")
                                     if otaUseLocalHTTPS {
                                         Image(systemName: "checkmark")
                                     }
@@ -142,7 +142,7 @@ struct AccountsView: View {
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(otaUseLocalHTTPS ? "HTTPS Cục bộ (localhost)" : "Trực tiếp")
+                                Text(otaUseLocalHTTPS ? "HTTPS Cục bộ" : "Trực tiếp")
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                                 Image(systemName: "chevron.up.chevron.down")
@@ -154,7 +154,7 @@ struct AccountsView: View {
 
                     if otaUseLocalHTTPS {
                         HStack {
-                            Label("Chứng chỉ CA v2", systemImage: service.localCATrustState.iconName)
+                            Label("Chứng chỉ CA cục bộ", systemImage: service.localCATrustState.iconName)
                                 .font(.subheadline)
                                 .foregroundColor(localCATrustColor)
                             Spacer(minLength: 8)
@@ -178,8 +178,8 @@ struct AccountsView: View {
                         } label: {
                             Label(
                                 service.localCATrustState == .trusted
-                                    ? "Tải lại chứng chỉ CA cục bộ (v2)"
-                                    : "Tải & Cài đặt chứng chỉ CA cục bộ (v2)",
+                                    ? "Tải lại chứng chỉ CA cục bộ"
+                                    : "Tải & Cài đặt chứng chỉ CA cục bộ",
                                 systemImage: "arrow.down.doc.fill"
                             )
                             .font(.subheadline)
@@ -189,7 +189,7 @@ struct AccountsView: View {
                     Text("Cài đặt gói .ipa (OTA)")
                 } footer: {
                     Text(otaUseLocalHTTPS
-                         ? "Chế độ HTTPS Cục bộ (https://localhost) hoạt động 100% offline. Hãy bấm 'Tải & Cài đặt chứng chỉ CA cục bộ (v2)', cài hồ sơ 'IPA Downloader Local Root CA v2' trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
+                         ? "Chế độ HTTPS Cục bộ hoạt động trực tiếp trên mạng cục bộ. Hãy bấm 'Tải & Cài đặt chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
                          : "Chế độ Trực tiếp không cần cài đặt chứng chỉ CA và hoạt động ngay khi nhấn nút Cài trong tab Tải xuống.")
                 }
 

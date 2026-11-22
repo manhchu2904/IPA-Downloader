@@ -536,14 +536,19 @@ private struct IPAInstallerSheet: View {
                     }
                     infoRow(title: "Dung lượng", value: file.formattedSize)
                     infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
-                    infoRow(title: "Chế độ OTA", value: useLocalHTTPSMode ? "HTTPS Cục bộ (localhost)" : "Trực tiếp")
+                    infoRow(
+                        title: "Chế độ OTA",
+                        value: useLocalHTTPSMode
+                            ? "HTTPS Cục bộ (\(session?.httpsHost ?? "Offline"))"
+                            : "Trực tiếp"
+                    )
                 }
 
                 Section {
                     if isStarting {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Đang khởi tạo máy chủ cài đặt cục bộ (localhost)...")
+                            Text("Đang khởi tạo máy chủ cài đặt cục bộ...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -562,7 +567,7 @@ private struct IPAInstallerSheet: View {
                                         .fontWeight(.semibold)
                                         .foregroundColor(.orange)
                                 }
-                                Text("Hãy cài hồ sơ 'IPA Downloader Local Root CA v2' và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
+                                Text("Hãy cài hồ sơ chứng chỉ CA cục bộ và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
 
@@ -571,7 +576,7 @@ private struct IPAInstallerSheet: View {
                                         UIApplication.shared.open(url)
                                     }
                                 } label: {
-                                    Label("Tải chứng chỉ CA cục bộ (v2) qua Safari", systemImage: "arrow.down.doc.fill")
+                                    Label("Tải chứng chỉ CA cục bộ qua Safari", systemImage: "arrow.down.doc.fill")
                                         .font(.subheadline)
                                 }
                             }
@@ -738,8 +743,14 @@ private struct IPAInstallerSheet: View {
             isStarting = false
             if useLocalHTTPSMode {
                 if service.localCATrustState == .trusted {
-                    if let diagErr = await service.verifyLocalHTTPSLoopback(httpsPort: started.httpsPort) {
+                    let host = started.httpsHost ?? "app.localtest.me"
+                    if let diagErr = await service.verifyLocalHTTPSLoopback(host: host, httpsPort: started.httpsPort) {
                         service.installTLSDiagnostic = diagErr
+                        if let fallbackStr = started.localHttpsFallbackItmsUrl,
+                           let fallbackURL = URL(string: fallbackStr) {
+                            UIApplication.shared.open(fallbackURL)
+                            return
+                        }
                     }
                     triggerITMSInstall(session: started)
                 }

@@ -565,6 +565,11 @@ final class IPAToolService: ObservableObject {
         let listener = BridgeInstallProgressListener { [weak self] stage, sent, total, pct in
             Task { @MainActor in
                 guard let self else { return }
+                if stage.hasPrefix("tls_log:") {
+                    let msg = String(stage.dropFirst("tls_log:".count))
+                    DebugLogger.log("OTA HTTPS server: \(msg)")
+                    return
+                }
                 if stage.hasPrefix("tls_error:") {
                     let msg = String(stage.dropFirst("tls_error:".count))
                     DebugLogger.log("OTA HTTPS server TLS log: \(msg)")
@@ -587,7 +592,7 @@ final class IPAToolService: ObservableObject {
         let session = try decoder.decode(InstallSession.self, from: Data(json.utf8))
         activeInstallSession = session
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
-        DebugLogger.log("OTA installer started: http=\(session.httpPort) https=\(session.httpsPort)")
+        DebugLogger.log("OTA installer started: host=\(session.httpsHost ?? "localhost") http=\(session.httpPort) https=\(session.httpsPort)")
         return session
     }
 
@@ -601,9 +606,9 @@ final class IPAToolService: ObservableObject {
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
     }
 
-    func verifyLocalHTTPSLoopback(httpsPort: Int) async -> String? {
-        guard let url = URL(string: "https://localhost:\(httpsPort)/ping") else {
-            return "URL localhost không hợp lệ"
+    func verifyLocalHTTPSLoopback(host: String, httpsPort: Int) async -> String? {
+        guard let url = URL(string: "https://\(host):\(httpsPort)/ping") else {
+            return "URL \(host) không hợp lệ"
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 4
@@ -614,11 +619,11 @@ final class IPAToolService: ObservableObject {
             let (data, response) = try await session.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             let body = String(data: data, encoding: .utf8) ?? ""
-            DebugLogger.log("OTA HTTPS self-test OK: status=\(code) body=\(body)")
+            DebugLogger.log("OTA HTTPS self-test OK (\(host):\(httpsPort)): status=\(code) body=\(body)")
             return nil
         } catch {
             let nsErr = error as NSError
-            let msg = "Self-test https://localhost:\(httpsPort) lỗi (\(nsErr.domain) \(nsErr.code)): \(nsErr.localizedDescription)"
+            let msg = "Self-test https://\(host):\(httpsPort) lỗi (\(nsErr.domain) \(nsErr.code)): \(nsErr.localizedDescription)"
             DebugLogger.log("OTA HTTPS self-test FAILED: \(msg)")
             return msg
         }
