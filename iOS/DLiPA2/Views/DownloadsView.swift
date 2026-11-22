@@ -10,6 +10,7 @@ struct DownloadsView: View {
     @State private var newFileName: String = ""
     @State private var renameError: String?
     @State private var confirmDeleteAccount: String?
+    @State private var fileToInstall: DownloadedIPA?
 
     private var availableAccountGroups: [String] {
         let emails = Set(service.downloadedFiles.map { $0.accountEmail })
@@ -87,6 +88,12 @@ struct DownloadsView: View {
                                 }
                                 .font(.caption)
                             }
+                        }
+                    } footer: {
+                        if service.hasActiveDownloads {
+                            Label("Chế độ giữ tải ngầm đang hoạt động — bạn có thể chuyển sang ứng dụng khác hoặc khóa màn hình.", systemImage: "bolt.shield.fill")
+                                .font(.caption2)
+                                .foregroundColor(.green)
                         }
                     }
                 }
@@ -180,6 +187,10 @@ struct DownloadsView: View {
                 set: { shareURL = $0?.url }
             )) { item in
                 ShareSheet(activityItems: [item.url])
+            }
+            .sheet(item: $fileToInstall) { file in
+                IPAInstallerSheet(file: file)
+                    .environmentObject(service)
             }
             .alert("Đổi tên file .ipa", isPresented: Binding(
                 get: { fileToRename != nil },
@@ -326,7 +337,31 @@ struct DownloadsView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
+
+            Button {
+                fileToInstall = file
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.app.fill")
+                    Text("Cài")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.15))
+                .foregroundColor(.accentColor)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.borderless)
+
             Menu {
+                Button {
+                    fileToInstall = file
+                } label: {
+                    Label("Cài đặt trực tiếp vào máy (OTA)", systemImage: "arrow.down.app.fill")
+                }
+
                 Button {
                     shareURL = file.url
                 } label: {
@@ -354,13 +389,18 @@ struct DownloadsView: View {
                     Label("Xóa file", systemImage: "trash")
                 }
             } label: {
-                Image(systemName: "square.and.arrow.up.circle")
+                Image(systemName: "ellipsis.circle")
                     .font(.title3)
             }
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
         .contextMenu {
+            Button {
+                fileToInstall = file
+            } label: {
+                Label("Cài đặt trực tiếp vào máy (OTA)", systemImage: "arrow.down.app.fill")
+            }
             Button {
                 shareURL = file.url
             } label: {
@@ -424,4 +464,245 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private struct IPAInstallerSheet: View {
+    @EnvironmentObject private var service: IPAToolService
+    @Environment(\.dismiss) private var dismiss
+
+    let file: DownloadedIPA
+
+    @State private var session: InstallSession?
+    @State private var isStarting = true
+    @State private var errorMessage: String?
+    @State private var useLocalHTTPSMode = false
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("Thông tin gói .ipa") {
+                    if let session {
+                        HStack {
+                            Text("Ứng dụng")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(session.appName)
+                                .fontWeight(.semibold)
+                        }
+                        HStack {
+                            Text("Bundle ID")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(session.bundleId)
+                                .font(.caption)
+                        }
+                        HStack {
+                            Text("Phiên bản")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("v\(session.version)")
+                        }
+                    } else {
+                        HStack {
+                            Text("Tên file")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(file.name)
+                                .font(.caption)
+                        }
+                    }
+                    HStack {
+                        Text("Dung lượng")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(file.formattedSize)
+                    }
+                    HStack {
+                        Text("Apple ID bản quyền")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(file.accountEmail)
+                            .font(.caption)
+                    }
+                }
+
+                Section("Trạng thái cài đặt OTA") {
+                    if isStarting {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Đang khởi tạo máy chủ cài đặt cục bộ (127.0.0.1)...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if let errorMessage {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.footnote)
+                    } else if let session {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 10) {
+                                Image(systemName: statusIcon)
+                                    .font(.title2)
+                                    .foregroundColor(statusColor)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(statusTitle)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text(statusSubtitle)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            if service.installStage == "sending_payload" || service.installStage == "completed" {
+                                ProgressView(value: min(max(service.installPercent, 0), 1))
+                                HStack {
+                                    Text("\(Int(min(max(service.installPercent, 0), 1) * 100))%")
+                                        .font(.caption2)
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    Text("\(ByteCountFormatter.string(fromByteCount: service.installSentBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: max(service.installTotalBytes, session.fileSize), countStyle: .file))")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        Button {
+                            triggerITMSInstall(session: session)
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "arrow.down.app.fill")
+                                Text("Hiện hộp thoại Cài đặt iOS")
+                                    .fontWeight(.semibold)
+                                Spacer()
+                            }
+                        }
+
+                        Button {
+                            let urlStr = useLocalHTTPSMode ? "\(session.safariInstallUrl)?mode=local" : session.safariInstallUrl
+                            if let url = URL(string: urlStr) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label("Mở trang cài đặt qua trình duyệt Safari", systemImage: "safari")
+                                .font(.subheadline)
+                        }
+                    }
+                }
+
+                if let session {
+                    Section {
+                        Picker("Phương thức Manifest", selection: $useLocalHTTPSMode) {
+                            Text("Trực tiếp (Không cần chứng chỉ)").tag(false)
+                            Text("HTTPS Cục bộ (DLiPA / Offline)").tag(true)
+                        }
+
+                        if useLocalHTTPSMode {
+                            Button {
+                                if let url = URL(string: session.caCertUrl) {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                Label("Tải chứng chỉ CA cục bộ (Cài đặt > Đã tải về hồ sơ)", systemImage: "checkmark.shield")
+                                    .font(.footnote)
+                            }
+                        }
+                    } header: {
+                        Text("Chế độ máy chủ OTA")
+                    } footer: {
+                        Text(useLocalHTTPSMode
+                             ? "Chế độ HTTPS Cục bộ (app.localhost.qaq.wiki) hoạt động 100% offline. Lần đầu sử dụng chế độ này, hãy bấm 'Tải chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
+                             : "Chế độ Trực tiếp không cần cài chứng chỉ CA. Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong).")
+                    }
+                }
+            }
+            .navigationTitle("Cài đặt vào máy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Đóng") {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await startServer()
+            }
+            .onDisappear {
+                service.stopIPAInstaller()
+            }
+        }
+    }
+
+    private var statusIcon: String {
+        switch service.installStage {
+        case "ready": return "iphone.and.arrow.forward"
+        case "sending_manifest": return "doc.badge.gearshape"
+        case "sending_payload": return "arrow.up.doc.fill"
+        case "completed": return "checkmark.seal.fill"
+        default: return "iphone.and.arrow.forward"
+        }
+    }
+
+    private var statusColor: Color {
+        switch service.installStage {
+        case "completed": return .green
+        case "sending_payload", "sending_manifest": return .accentColor
+        default: return .orange
+        }
+    }
+
+    private var statusTitle: String {
+        switch service.installStage {
+        case "ready":
+            return "Sẵn sàng cài đặt"
+        case "sending_manifest":
+            return "Đã gửi Manifest cho iOS..."
+        case "sending_payload":
+            return "Đang truyền gói .ipa vào hệ thống iOS..."
+        case "completed":
+            return "Đã truyền xong gói .ipa!"
+        default:
+            return service.installStage
+        }
+    }
+
+    private var statusSubtitle: String {
+        switch service.installStage {
+        case "ready":
+            return "Nhấn 'Cài đặt' trên hộp thoại hệ thống iOS để bắt đầu."
+        case "sending_manifest":
+            return "Hệ thống iOS đang xác thực thông tin gói cài đặt."
+        case "sending_payload":
+            return "Giữ ứng dụng chạy (hoặc thoát ra màn hình chính theo dõi, không vuốt đóng app)."
+        case "completed":
+            return "iOS đang tiến hành giải nén và cài đặt ứng dụng ngoài màn hình chính."
+        default:
+            return ""
+        }
+    }
+
+    private func startServer() async {
+        isStarting = true
+        errorMessage = nil
+        do {
+            let started = try await service.startIPAInstaller(for: file)
+            session = started
+            isStarting = false
+            triggerITMSInstall(session: started)
+        } catch {
+            errorMessage = error.localizedDescription
+            isStarting = false
+        }
+    }
+
+    private func triggerITMSInstall(session: InstallSession) {
+        let target = useLocalHTTPSMode ? session.localHttpsItmsUrl : session.directItmsUrl
+        if let url = URL(string: target) {
+            UIApplication.shared.open(url)
+        }
+    }
 }

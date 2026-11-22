@@ -16,6 +16,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dlipa2.app
         INFOPLIST_FILE: DLiPA2/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_BITCODE: NO
