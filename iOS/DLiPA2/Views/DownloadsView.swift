@@ -748,7 +748,7 @@ private struct IPAInstallerSheet: View {
                         service.installTLSDiagnostic = diagErr
                         if let fallbackStr = started.localHttpsFallbackItmsUrl,
                            let fallbackURL = URL(string: fallbackStr) {
-                            UIApplication.shared.open(fallbackURL)
+                            await UIApplication.shared.open(fallbackURL)
                             return
                         }
                     }
