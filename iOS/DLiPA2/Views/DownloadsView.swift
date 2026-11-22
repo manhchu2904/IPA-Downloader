@@ -536,14 +536,19 @@ private struct IPAInstallerSheet: View {
                     }
                     infoRow(title: "Dung lượng", value: file.formattedSize)
                     infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
-                    infoRow(title: "Chế độ OTA", value: useLocalHTTPSMode ? "HTTPS Cục bộ (127.0.0.1)" : "Trực tiếp")
+                    infoRow(
+                        title: "Chế độ OTA",
+                        value: useLocalHTTPSMode
+                            ? "HTTPS Cục bộ (\(session?.httpsHost ?? "Offline"))"
+                            : "Trực tiếp"
+                    )
                 }
 
                 Section {
                     if isStarting {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Đang khởi tạo máy chủ cài đặt cục bộ (127.0.0.1)...")
+                            Text("Đang khởi tạo máy chủ cài đặt cục bộ...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -552,6 +557,52 @@ private struct IPAInstallerSheet: View {
                             .foregroundColor(.red)
                             .font(.subheadline)
                     } else if let session {
+                        if useLocalHTTPSMode && service.localCATrustState != .trusted {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text(service.localCATrustState.title)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                                Text("Hãy cài hồ sơ chứng chỉ CA cục bộ và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                Button {
+                                    if let url = URL(string: session.caCertUrl) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    Label("Tải chứng chỉ CA cục bộ qua Safari", systemImage: "arrow.down.doc.fill")
+                                        .font(.subheadline)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        if useLocalHTTPSMode, let tlsDiag = service.installTLSDiagnostic {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Chẩn đoán TLS cục bộ", systemImage: "exclamationmark.shield.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.red)
+                                Text(tlsDiag)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Button {
+                                    useLocalHTTPSMode = false
+                                    service.installTLSDiagnostic = nil
+                                    triggerITMSInstall(session: session)
+                                } label: {
+                                    Label("Chuyển sang Chế độ Trực tiếp & Cài ngay", systemImage: "bolt.fill")
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
                                 Image(systemName: statusIcon)
@@ -596,7 +647,14 @@ private struct IPAInstallerSheet: View {
                         }
 
                         Button {
-                            let urlStr = useLocalHTTPSMode ? "\(session.safariInstallUrl)?mode=local" : session.safariInstallUrl
+                            let urlStr: String
+                            if useLocalHTTPSMode {
+                                let host = session.httpsHost ?? "app.localtest.me"
+                                urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
+                            } else {
+                                urlStr = session.safariInstallUrl
+                            }
+                            DebugLogger.log("OTA opening Safari URL: \(urlStr)")
                             if let url = URL(string: urlStr) {
                                 UIApplication.shared.open(url)
                             }
@@ -621,7 +679,13 @@ private struct IPAInstallerSheet: View {
                 }
             }
             .task {
+                await service.refreshLocalCATrustState()
                 await startServer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
             }
             .onDisappear {
                 service.stopIPAInstaller()
@@ -684,7 +748,22 @@ private struct IPAInstallerSheet: View {
             let started = try await service.startIPAInstaller(for: file)
             session = started
             isStarting = false
-            triggerITMSInstall(session: started)
+            if useLocalHTTPSMode {
+                if service.localCATrustState == .trusted {
+                    let host = started.httpsHost ?? "app.localtest.me"
+                    if let diagErr = await service.verifyLocalHTTPSLoopback(host: host, httpsPort: started.httpsPort) {
+                        service.installTLSDiagnostic = diagErr
+                        if let fallbackStr = started.localHttpsFallbackItmsUrl,
+                           let fallbackURL = URL(string: fallbackStr) {
+                            await UIApplication.shared.open(fallbackURL)
+                            return
+                        }
+                    }
+                    triggerITMSInstall(session: started)
+                }
+            } else {
+                triggerITMSInstall(session: started)
+            }
         } catch {
             errorMessage = error.localizedDescription
             isStarting = false
@@ -693,8 +772,11 @@ private struct IPAInstallerSheet: View {
 
     private func triggerITMSInstall(session: InstallSession) {
         let target = useLocalHTTPSMode ? session.localHttpsItmsUrl : session.directItmsUrl
+        DebugLogger.log("OTA opening ITMS URL: \(target)")
         if let url = URL(string: target) {
-            UIApplication.shared.open(url)
+            UIApplication.shared.open(url, options: [:]) { success in
+                DebugLogger.log("OTA open ITMS result: \(success)")
+            }
         }
     }
 }

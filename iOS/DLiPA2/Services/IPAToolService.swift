@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Security
 import Ipatoolbridge
 
 @MainActor
@@ -9,7 +10,10 @@ final class IPAToolService: ObservableObject {
     @Published var activeDownloads: [ActiveDownload] = []
     @Published var downloadedFiles: [DownloadedIPA] = []
     @Published var activeInstallSession: InstallSession?
+    @Published var isCACertServerRunning: Bool = false
+    @Published var localCATrustState: LocalCACertTrustState = .notInstalled
     @Published var installStage: String = "ready"
+    @Published var installTLSDiagnostic: String?
     @Published var installSentBytes: Int64 = 0
     @Published var installTotalBytes: Int64 = 0
     @Published var installPercent: Double = 0
@@ -69,6 +73,7 @@ final class IPAToolService: ObservableObject {
             Task {
                 await refreshAccounts()
                 refreshDownloadedFiles()
+                await refreshLocalCATrustState()
                 await prepareRuntimeIfNeeded()
             }
         } catch {
@@ -294,7 +299,7 @@ final class IPAToolService: ObservableObject {
     }
 
     var hasActiveDownloads: Bool {
-        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil } || activeInstallSession != nil
+        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil } || activeInstallSession != nil || isCACertServerRunning
     }
 
     func listVersions(for app: AppItem, platform: String = "iphone", purchaseIfNeeded: Bool = false) async throws -> VersionHistory {
@@ -552,6 +557,7 @@ final class IPAToolService: ObservableObject {
         }
 
         installStage = "ready"
+        installTLSDiagnostic = nil
         installSentBytes = 0
         installTotalBytes = file.size
         installPercent = 0
@@ -559,6 +565,20 @@ final class IPAToolService: ObservableObject {
         let listener = BridgeInstallProgressListener { [weak self] stage, sent, total, pct in
             Task { @MainActor in
                 guard let self else { return }
+                if stage.hasPrefix("tls_log:") {
+                    let msg = String(stage.dropFirst("tls_log:".count))
+                    DebugLogger.log("OTA HTTPS server: \(msg)")
+                    return
+                }
+                if stage.hasPrefix("tls_error:") {
+                    let msg = String(stage.dropFirst("tls_error:".count))
+                    DebugLogger.log("OTA HTTPS server TLS log: \(msg)")
+                    self.installTLSDiagnostic = msg
+                    return
+                }
+                if stage != self.installStage {
+                    DebugLogger.log("OTA install stage -> \(stage)")
+                }
                 self.installStage = stage
                 self.installSentBytes = sent
                 self.installTotalBytes = total
@@ -572,28 +592,101 @@ final class IPAToolService: ObservableObject {
         let session = try decoder.decode(InstallSession.self, from: Data(json.utf8))
         activeInstallSession = session
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+        DebugLogger.log("OTA installer started: host=\(session.httpsHost ?? "localhost") http=\(session.httpPort) https=\(session.httpsPort)")
         return session
     }
 
     func stopIPAInstaller() {
         client?.stopIPAInstaller()
         activeInstallSession = nil
+        isCACertServerRunning = false
         installStage = "ready"
+        installTLSDiagnostic = nil
         installPercent = 0
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+    }
+
+    func verifyLocalHTTPSLoopback(host: String, httpsPort: Int) async -> String? {
+        guard let url = URL(string: "https://\(host):\(httpsPort)/ping") else {
+            return "URL \(host) không hợp lệ"
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        let config = URLSessionConfiguration.ephemeral
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        do {
+            let (data, response) = try await session.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? ""
+            DebugLogger.log("OTA HTTPS self-test OK (\(host):\(httpsPort)): status=\(code) body=\(body)")
+            return nil
+        } catch {
+            let nsErr = error as NSError
+            let msg = "Self-test https://\(host):\(httpsPort) lỗi (\(nsErr.domain) \(nsErr.code)): \(nsErr.localizedDescription)"
+            DebugLogger.log("OTA HTTPS self-test FAILED: \(msg)")
+            return msg
+        }
     }
 
     func startCACertServer() async throws -> URL {
         guard let client else {
             throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
-        let urlStr = try await runBridge { errPtr in
+        isCACertServerRunning = true
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+
+        let jsonStr = try await runBridge { errPtr in
             client.startCACertServer(errPtr)
         }
-        guard let url = URL(string: urlStr) else {
+        let dto = try decoder.decode(InstallSession.self, from: Data(jsonStr.utf8))
+        guard let url = URL(string: dto.caCertUrl) else {
+            isCACertServerRunning = false
+            BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
             throw NSError(domain: "IPADownloader", code: -3, userInfo: [NSLocalizedDescriptionKey: "Invalid CA certificate URL"])
         }
+        await refreshLocalCATrustState()
         return url
+    }
+
+    func refreshLocalCATrustState() async {
+        guard let client else { return }
+        do {
+            let jsonStr = try await runBridge { errPtr in
+                client.getInstallerCertChainJSON(errPtr)
+            }
+            let payload = try decoder.decode(InstallerCertChainPayload.self, from: Data(jsonStr.utf8))
+            let hasDownloadedProfile = client.hasServedCACert()
+            let isSystemTrusted = Self.evaluateLocalTLSLeafTrust(leafDER: payload.leafDer)
+            if isSystemTrusted {
+                self.localCATrustState = .trusted
+                if self.isCACertServerRunning && self.activeInstallSession == nil {
+                    self.isCACertServerRunning = false
+                    BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: self.hasActiveDownloads)
+                }
+            } else if hasDownloadedProfile {
+                self.localCATrustState = .profileDownloadedNotTrusted
+            } else {
+                self.localCATrustState = .notInstalled
+            }
+        } catch {
+            self.localCATrustState = .notInstalled
+        }
+    }
+
+    private nonisolated static func evaluateLocalTLSLeafTrust(leafDER: Data) -> Bool {
+        guard let leafCert = SecCertificateCreateWithData(nil, leafDER as CFData) else {
+            return false
+        }
+        let policy = SecPolicyCreateSSL(true, "localhost" as CFString)
+        var trust: SecTrust?
+        // Pass ONLY the leaf certificate so trustd must verify against the Root CA installed & trusted in iOS Settings.
+        let status = SecTrustCreateWithCertificates([leafCert] as CFArray, policy, &trust)
+        guard status == errSecSuccess, let trust else {
+            return false
+        }
+        var cfError: CFError?
+        return SecTrustEvaluateWithError(trust, &cfError)
     }
 
     // MARK: - Helpers
