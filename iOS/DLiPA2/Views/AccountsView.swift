@@ -7,6 +7,7 @@ struct AccountsView: View {
     @State private var errorAlert: String?
     @State private var jitEnabled = JITHelper.isJITEnabled()
     @State private var jitPoolReady = JITHelper.isJITPoolReady()
+    @AppStorage("otaUseLocalHTTPS") private var otaUseLocalHTTPS = false
 
     var body: some View {
         NavigationView {
@@ -115,25 +116,83 @@ struct AccountsView: View {
 
                 Section {
                     HStack {
+                        Label("Phương thức cài đặt", systemImage: "iphone.and.arrow.forward")
+                            .font(.subheadline)
+                        Spacer()
+                        Menu {
+                            Button {
+                                otaUseLocalHTTPS = false
+                            } label: {
+                                HStack {
+                                    Text("Trực tiếp (Không cần chứng chỉ)")
+                                    if !otaUseLocalHTTPS {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            Button {
+                                otaUseLocalHTTPS = true
+                            } label: {
+                                HStack {
+                                    Text("HTTPS Cục bộ (127.0.0.1 / Offline)")
+                                    if otaUseLocalHTTPS {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(otaUseLocalHTTPS ? "HTTPS Cục bộ (127.0.0.1)" : "Trực tiếp")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if otaUseLocalHTTPS {
+                        Button {
+                            openLocalCACertInSafari()
+                        } label: {
+                            Label("Tải & Cài đặt chứng chỉ CA cục bộ", systemImage: "checkmark.shield")
+                                .font(.subheadline)
+                        }
+                    }
+                } header: {
+                    Text("Cài đặt gói .ipa (OTA)")
+                } footer: {
+                    Text(otaUseLocalHTTPS
+                         ? "Chế độ HTTPS Cục bộ (https://127.0.0.1) hoạt động 100% offline. Lần đầu sử dụng, hãy bấm 'Tải & Cài đặt chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
+                         : "Chế độ Trực tiếp không cần cài đặt chứng chỉ CA và hoạt động ngay khi nhấn nút Cài trong tab Tải xuống.")
+                }
+
+                Section {
+                    HStack {
                         Label("Phiên bản", systemImage: "app.badge.checkmark")
+                            .font(.subheadline)
                         Spacer()
                         Text("v\(appVersion) (Build \(appBuild))")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
                     HStack {
                         Label("Core Engine", systemImage: "cpu")
+                            .font(.subheadline)
                         Spacer()
                         Text("ipatool v2 • Unicorn 2.1.4")
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
                     HStack {
                         Label("Cơ chế JIT", systemImage: "memorychip")
+                            .font(.subheadline)
                         Spacer()
                         Text("Split-W^X Dual-Map (iOS \(UIDevice.current.systemVersion))")
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
@@ -141,12 +200,15 @@ struct AccountsView: View {
                         Link(destination: repoURL) {
                             HStack {
                                 Label("Mã nguồn (GitHub)", systemImage: "chevron.left.forwardslash.chevron.right")
+                                    .font(.subheadline)
                                 Spacer()
                                 Text("manhchu2904/IPA-Downloader")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -156,12 +218,13 @@ struct AccountsView: View {
                         Link(destination: ipatoolURL) {
                             HStack {
                                 Label("Lõi ipatool gốc", systemImage: "shippingbox")
+                                    .font(.subheadline)
                                 Spacer()
                                 Text("majd/ipatool")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -219,6 +282,17 @@ struct AccountsView: View {
         JITHelper.prepareStartupJIT26PoolIfNeeded()
         jitEnabled = JITHelper.isJITEnabled()
         jitPoolReady = JITHelper.isJITPoolReady()
+    }
+
+    private func openLocalCACertInSafari() {
+        Task {
+            do {
+                let url = try await service.startCACertServer()
+                await UIApplication.shared.open(url)
+            } catch {
+                errorAlert = error.localizedDescription
+            }
+        }
     }
 }
 

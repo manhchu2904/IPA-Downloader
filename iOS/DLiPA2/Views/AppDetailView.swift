@@ -65,12 +65,33 @@ struct AppDetailView: View {
                 LabeledContentRow(title: "Phiên bản mới nhất", value: "v\(app.version)")
 
                 if service.accounts.count > 1 {
-                    Picker("Apple ID tải về", selection: Binding(
-                        get: { service.selectedAccountId ?? service.accounts.first?.id ?? "" },
-                        set: { service.selectedAccountId = $0 }
-                    )) {
-                        ForEach(service.accounts) { account in
-                            Text("\(account.email) (\(account.storefrontCountryCode))").tag(account.id)
+                    HStack {
+                        Text("Apple ID tải về")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer(minLength: 12)
+                        Menu {
+                            ForEach(service.accounts) { account in
+                                Button {
+                                    service.selectedAccountId = account.id
+                                } label: {
+                                    HStack {
+                                        Text("\(account.email) (\(account.storefrontCountryCode))")
+                                        if account.id == service.selectedAccount?.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(activeAccountEmail)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                            }
                         }
                     }
                 } else {
@@ -86,6 +107,7 @@ struct AppDetailView: View {
                     HStack {
                         Image(systemName: "arrow.down.circle.fill")
                         Text("Tải phiên bản mới nhất (v\(app.version))")
+                            .font(.subheadline)
                             .fontWeight(.semibold)
                     }
                 }
@@ -97,6 +119,7 @@ struct AppDetailView: View {
                     HStack {
                         Image(systemName: "number.circle")
                         Text("Nhập Version ID thủ công để tải...")
+                            .font(.subheadline)
                     }
                 }
             } footer: {
@@ -108,12 +131,14 @@ struct AppDetailView: View {
                     HStack(spacing: 10) {
                         ProgressView()
                         Text("Đang tải danh sách lịch sử phiên bản...")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 } else if let history = versionHistory {
                     let orderedIds = Array(history.versionIds.reversed())
                     if orderedIds.isEmpty {
                         Text("Không có dữ liệu phiên bản cũ.")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     } else {
                         if orderedIds.count > 5 {
@@ -121,6 +146,7 @@ struct AppDetailView: View {
                                 Image(systemName: "line.3.horizontal.decrease.circle")
                                     .foregroundColor(.secondary)
                                 TextField("Lọc phiên bản (vd: 8.5, 2025, hoặc ID)...", text: $versionFilterText)
+                                    .font(.subheadline)
                                     .autocapitalization(.none)
                                     .disableAutocorrection(true)
                                 if !versionFilterText.isEmpty {
@@ -138,7 +164,7 @@ struct AppDetailView: View {
                         let visibleIds = filteredVersionIDs(from: orderedIds)
                         if visibleIds.isEmpty {
                             Text("Không có phiên bản nào khớp với \"\(versionFilterText)\".")
-                                .font(.footnote)
+                                .font(.subheadline)
                                 .foregroundColor(.secondary)
                         } else {
                             ForEach(visibleIds, id: \.self) { vid in
@@ -151,6 +177,7 @@ struct AppDetailView: View {
                         loadVersions()
                     } label: {
                         Label("Tải lịch sử phiên bản", systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline)
                     }
                 }
 
@@ -307,32 +334,33 @@ struct AppDetailView: View {
         errorMessage = nil
         Task {
             defer { isLoadingVersions = false }
-            async let publicDirTask = service.fetchPublicVersionDirectory(appId: app.id, platform: platform)
-            let publicDir = await publicDirTask
+            let publicDir = await service.fetchPublicVersionDirectory(appId: app.id, platform: platform)
 
+            // Fast path (<0.3s): immediately display the public version directory if available
+            // without waiting 5-8s for Unicorn StoreAMD + volumeStoreDownloadProduct.
+            if !publicDir.ordered.isEmpty {
+                let newestFirstIds = publicDir.ordered.map { $0.versionId }
+                let fastHistory = VersionHistory(
+                    latestVersionId: newestFirstIds.first ?? "",
+                    versionIds: Array(newestFirstIds.reversed())
+                )
+                versionHistory = fastHistory
+                hydrateCachedMetadata(for: fastHistory, publicMap: publicDir.map)
+                return
+            }
+
+            // Fallback path for rare/new apps not yet indexed in the public version directory
             do {
                 let history = try await service.listVersions(for: app, platform: platform, purchaseIfNeeded: false)
                 versionHistory = history
                 hydrateCachedMetadata(for: history, publicMap: publicDir.map)
             } catch {
-                // If the account does not yet own a license for this free app (or Apple's endpoint fails),
-                // still display the full public version history without error; license acquisition happens on Download.
-                if !publicDir.ordered.isEmpty {
-                    let newestFirstIds = publicDir.ordered.map { $0.versionId }
-                    let fallbackHistory = VersionHistory(
-                        latestVersionId: newestFirstIds.first ?? "",
-                        versionIds: Array(newestFirstIds.reversed())
-                    )
-                    versionHistory = fallbackHistory
-                    hydrateCachedMetadata(for: fallbackHistory, publicMap: publicDir.map)
-                } else {
-                    do {
-                        let history = try await service.listVersions(for: app, platform: platform, purchaseIfNeeded: true)
-                        versionHistory = history
-                        hydrateCachedMetadata(for: history, publicMap: publicDir.map)
-                    } catch {
-                        errorMessage = error.localizedDescription
-                    }
+                do {
+                    let history = try await service.listVersions(for: app, platform: platform, purchaseIfNeeded: true)
+                    versionHistory = history
+                    hydrateCachedMetadata(for: history, publicMap: publicDir.map)
+                } catch {
+                    errorMessage = error.localizedDescription
                 }
             }
         }
@@ -380,10 +408,14 @@ private struct LabeledContentRow: View {
     var body: some View {
         HStack {
             Text(title)
+                .font(.subheadline)
                 .foregroundColor(.secondary)
-            Spacer()
+            Spacer(minLength: 12)
             Text(value)
+                .font(.subheadline)
                 .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .textSelection(.enabled)
         }
     }

@@ -85,3 +85,17 @@ struct DownloadedIPA: Identifiable, Hashable {
         ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
     }
 }
+
+struct InstallSession: Codable, Identifiable {
+    var id: String { "\(bundleId)_\(httpPort)" }
+    let bundleId: String
+    let appName: String
+    let version: String
+    let fileSize: Int64
+    let httpPort: Int
+    let httpsPort: Int
+    let directItmsUrl: String
+    let localHttpsItmsUrl: String
+    let safariInstallUrl: String
+    let caCertUrl: String
+}

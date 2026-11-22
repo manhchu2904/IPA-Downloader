@@ -8,6 +8,11 @@ final class IPAToolService: ObservableObject {
     @Published var selectedAccountId: String?
     @Published var activeDownloads: [ActiveDownload] = []
     @Published var downloadedFiles: [DownloadedIPA] = []
+    @Published var activeInstallSession: InstallSession?
+    @Published var installStage: String = "ready"
+    @Published var installSentBytes: Int64 = 0
+    @Published var installTotalBytes: Int64 = 0
+    @Published var installPercent: Double = 0
     @Published var initError: String?
 
     private var client: IpatoolbridgeClient?
@@ -289,7 +294,7 @@ final class IPAToolService: ObservableObject {
     }
 
     var hasActiveDownloads: Bool {
-        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil }
+        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil } || activeInstallSession != nil
     }
 
     func listVersions(for app: AppItem, platform: String = "iphone", purchaseIfNeeded: Bool = false) async throws -> VersionHistory {
@@ -362,6 +367,7 @@ final class IPAToolService: ObservableObject {
             accountEmail: account.email
         )
         activeDownloads.insert(item, at: 0)
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
 
         var lastSampleTime = Date()
         var lastSampleBytes: Int64 = 0
@@ -412,6 +418,12 @@ final class IPAToolService: ObservableObject {
                     activeDownloads[idx].stage = "completed"
                     activeDownloads[idx].isCompleted = true
                 }
+                BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+                BackgroundDownloadManager.shared.notifyDownloadCompleted(
+                    appName: app.name,
+                    versionLabel: versionLabel,
+                    accountEmail: account.email
+                )
                 refreshDownloadedFiles()
             } catch {
                 if let idx = activeDownloads.firstIndex(where: { $0.id == downloadId }) {
@@ -419,6 +431,11 @@ final class IPAToolService: ObservableObject {
                     activeDownloads[idx].stage = "failed"
                     activeDownloads[idx].errorMessage = error.localizedDescription
                 }
+                BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+                BackgroundDownloadManager.shared.notifyDownloadFailed(
+                    appName: app.name,
+                    error: error.localizedDescription
+                )
             }
         }
     }
@@ -426,6 +443,7 @@ final class IPAToolService: ObservableObject {
     func cancelDownload(id: String) {
         client?.cancelDownload(id)
         activeDownloads.removeAll { $0.id == id }
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
     }
 
     func removeFinishedDownloadEntry(id: String) {
@@ -526,6 +544,58 @@ final class IPAToolService: ObservableObject {
         refreshDownloadedFiles()
     }
 
+    // MARK: - Direct On-Device OTA Installer (itms-services://)
+
+    func startIPAInstaller(for file: DownloadedIPA) async throws -> InstallSession {
+        guard let client else {
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
+
+        installStage = "ready"
+        installSentBytes = 0
+        installTotalBytes = file.size
+        installPercent = 0
+
+        let listener = BridgeInstallProgressListener { [weak self] stage, sent, total, pct in
+            Task { @MainActor in
+                guard let self else { return }
+                self.installStage = stage
+                self.installSentBytes = sent
+                self.installTotalBytes = total
+                self.installPercent = pct
+            }
+        }
+
+        let json = try await runBridge { errPtr in
+            client.startIPAInstaller(file.url.path, listener: listener, error: errPtr)
+        }
+        let session = try decoder.decode(InstallSession.self, from: Data(json.utf8))
+        activeInstallSession = session
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+        return session
+    }
+
+    func stopIPAInstaller() {
+        client?.stopIPAInstaller()
+        activeInstallSession = nil
+        installStage = "ready"
+        installPercent = 0
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+    }
+
+    func startCACertServer() async throws -> URL {
+        guard let client else {
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
+        let urlStr = try await runBridge { errPtr in
+            client.startCACertServer(errPtr)
+        }
+        guard let url = URL(string: urlStr) else {
+            throw NSError(domain: "IPADownloader", code: -3, userInfo: [NSLocalizedDescriptionKey: "Invalid CA certificate URL"])
+        }
+        return url
+    }
+
     // MARK: - Helpers
 
     private func runBridge(_ work: @escaping (NSErrorPointer) -> String) async throws -> String {
@@ -561,6 +631,18 @@ private final class BridgeProgressListener: NSObject, IpatoolbridgeProgressListe
 
     func onProgress(_ downloadID: String?, downloadedBytes: Int64, totalBytes: Int64, percent: Double, stage: String?) {
         handler(downloadID ?? "", downloadedBytes, totalBytes, percent, stage ?? "")
+    }
+}
+
+private final class BridgeInstallProgressListener: NSObject, IpatoolbridgeInstallProgressListenerProtocol {
+    private let handler: (String, Int64, Int64, Double) -> Void
+
+    init(handler: @escaping (String, Int64, Int64, Double) -> Void) {
+        self.handler = handler
+    }
+
+    func onInstallProgress(_ stage: String?, sentBytes: Int64, totalBytes: Int64, percent: Double) {
+        handler(stage ?? "ready", sentBytes, totalBytes, percent)
     }
 }
 
