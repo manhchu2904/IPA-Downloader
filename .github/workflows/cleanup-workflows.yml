@@ -13,8 +13,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    - cron: "0 0 * * 0"
 
 permissions:
   actions: write
