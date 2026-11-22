@@ -647,7 +647,14 @@ private struct IPAInstallerSheet: View {
                         }
 
                         Button {
-                            let urlStr = useLocalHTTPSMode ? "\(session.safariInstallUrl)?mode=local" : session.safariInstallUrl
+                            let urlStr: String
+                            if useLocalHTTPSMode {
+                                let host = session.httpsHost ?? "app.localtest.me"
+                                urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
+                            } else {
+                                urlStr = session.safariInstallUrl
+                            }
+                            DebugLogger.log("OTA opening Safari URL: \(urlStr)")
                             if let url = URL(string: urlStr) {
                                 UIApplication.shared.open(url)
                             }
@@ -765,8 +772,11 @@ private struct IPAInstallerSheet: View {
 
     private func triggerITMSInstall(session: InstallSession) {
         let target = useLocalHTTPSMode ? session.localHttpsItmsUrl : session.directItmsUrl
+        DebugLogger.log("OTA opening ITMS URL: \(target)")
         if let url = URL(string: target) {
-            UIApplication.shared.open(url)
+            UIApplication.shared.open(url, options: [:]) { success in
+                DebugLogger.log("OTA open ITMS result: \(success)")
+            }
         }
     }
 }

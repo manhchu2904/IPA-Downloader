@@ -65,6 +65,22 @@ var (
 
 const loopbackFQDNHost = "app.localtest.me"
 
+func listenInPortRange(minPort, maxPort int) (net.Listener, error) {
+	span := maxPort - minPort + 1
+	startOffset := int(time.Now().UnixNano() % int64(span))
+	if startOffset < 0 {
+		startOffset = -startOffset
+	}
+	for i := 0; i < 40; i++ {
+		port := minPort + ((startOffset + i*17) % span)
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			return ln, nil
+		}
+	}
+	return net.Listen("tcp", ":0")
+}
+
 func detectLocalLANIPv4() string {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -234,10 +250,11 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	lanIP := detectLocalLANIPv4()
 	var extraIPs []net.IP
 	httpsHost := loopbackFQDNHost
+	fallbackHost := "localhost"
 	if lanIP != "" {
 		if parsedIP := net.ParseIP(lanIP); parsedIP != nil {
 			extraIPs = append(extraIPs, parsedIP)
-			httpsHost = lanIP
+			fallbackHost = lanIP
 		}
 	}
 
@@ -246,13 +263,13 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 		return "", fmt.Errorf("prepare installer TLS certificates: %w", err)
 	}
 
-	httpLn, err := net.Listen("tcp", ":0")
+	httpLn, err := listenInPortRange(4000, 7999)
 	if err != nil {
 		return "", fmt.Errorf("listen local HTTP: %w", err)
 	}
 	httpPort := httpLn.Addr().(*net.TCPAddr).Port
 
-	httpsLn, err := net.Listen("tcp", ":0")
+	httpsLn, err := listenInPortRange(4000, 7999)
 	if err != nil {
 		_ = httpLn.Close()
 		return "", fmt.Errorf("listen local HTTPS: %w", err)
@@ -262,7 +279,7 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	httpPayloadURL := fmt.Sprintf("http://127.0.0.1:%d/payload.ipa", httpPort)
 	httpsPayloadURL := fmt.Sprintf("https://%s:%d/payload.ipa", httpsHost, httpsPort)
 	httpsManifestURL := fmt.Sprintf("https://%s:%d/manifest.plist", httpsHost, httpsPort)
-	fallbackManifestURL := fmt.Sprintf("https://%s:%d/manifest.plist", loopbackFQDNHost, httpsPort)
+	fallbackManifestURL := fmt.Sprintf("https://%s:%d/manifest.plist", fallbackHost, httpsPort)
 
 	// Method 1: Public HTTPS manifest generator pointing software-package to local HTTP 127.0.0.1 (no Root CA required)
 	genParams := url.Values{}
@@ -273,7 +290,7 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	externalManifestURL := "https://api.palera.in/genPlist?" + genParams.Encode()
 	directITMSURL := "itms-services://?action=download-manifest&url=" + url.QueryEscape(externalManifestURL)
 
-	// Method 2: Local HTTPS manifest using non-loopback LAN IP (en0, 100% offline) or loopback FQDN fallback
+	// Method 2: Local HTTPS manifest using real FQDN (app.localtest.me -> 127.0.0.1) on port 4000..7999 like Feather
 	localHTTPSITMSURL := "itms-services://?action=download-manifest&url=" + httpsManifestURL
 	localHTTPSFallbackITMSURL := "itms-services://?action=download-manifest&url=" + fallbackManifestURL
 
@@ -385,15 +402,21 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	activeTLSServer = httpsSrv
 	installerMu.Unlock()
 
+	loggedHTTPLn := &loggingListener{
+		Listener: httpLn,
+		onAccept: func(remoteAddr string) {
+			notify("tls_log:HTTP TCP accept from "+remoteAddr, 0, meta.FileSize, 0)
+		},
+	}
 	loggedHTTPSLn := &loggingListener{
 		Listener: httpsLn,
 		onAccept: func(remoteAddr string) {
-			notify("tls_log:TCP accept from "+remoteAddr, 0, meta.FileSize, 0)
+			notify("tls_log:HTTPS TCP accept from "+remoteAddr, 0, meta.FileSize, 0)
 		},
 	}
 
 	go func() {
-		_ = httpSrv.Serve(httpLn)
+		_ = httpSrv.Serve(loggedHTTPLn)
 	}()
 	go func() {
 		_ = httpsSrv.Serve(tls.NewListener(loggedHTTPSLn, tlsConfig))
@@ -659,10 +682,10 @@ func (c *Client) ensureInstallerCertificates(extraIPs []net.IP) ([]byte, tls.Cer
 	var parsedCA *x509.Certificate
 	var caKey *rsa.PrivateKey
 
-	// Reuse existing RSA Root CA + key whenever present so users never need to reinstall CA when LAN IP changes.
+	// Reuse existing RSA Root CA + key whenever present and matching the clean CA name so users never need to reinstall CA when LAN IP changes.
 	if rawCA, err1 := os.ReadFile(caCertPath); err1 == nil {
 		if rawCAKey, err2 := os.ReadFile(caKeyPath); err2 == nil {
-			if pCA, err3 := x509.ParseCertificate(rawCA); err3 == nil {
+			if pCA, err3 := x509.ParseCertificate(rawCA); err3 == nil && pCA.Subject.CommonName == "IPA Downloader Local Root CA" {
 				if blk, _ := pem.Decode(rawCAKey); blk != nil {
 					if pKey, err4 := x509.ParsePKCS1PrivateKey(blk.Bytes); err4 == nil {
 						caDER = rawCA
