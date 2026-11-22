@@ -1,6 +1,27 @@
 {
   "version": 2,
   "skills": {
+    "clang": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "18f29518a47fda070e6ec1268cb577692fae9a10",
+      "sourceType": "github",
+      "skillPath": "skills/compilers/clang/SKILL.md",
+      "computedHash": "ea70d1728c4fbaa94ee71d457e1aa1a8a985dfd940fa0a8f8bc7fdab5ab8097f"
+    },
+    "cmake": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "18f29518a47fda070e6ec1268cb577692fae9a10",
+      "sourceType": "github",
+      "skillPath": "skills/build-systems/cmake/SKILL.md",
+      "computedHash": "73b0f1e334e5e5d5cb50460fa71e35e6029fab5f56a4a91b83a5d0af597d7a52"
+    },
+    "gh-fix-ci": {
+      "source": "openai/skills",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "sourceType": "github",
+      "skillPath": "skills/.curated/gh-fix-ci/SKILL.md",
+      "computedHash": "c937071ab3bf10c67ce9ca4152f318de0d9fbb5a24e2652a7e7d5a760bbc31be"
+    },
     "github-actions": {
       "source": "callstackincubator/agent-skills",
       "commit": "59e9d17446a248b21d86f078fcd0bd2d36db1ca4",
@@ -42,6 +63,34 @@
       "sourceType": "github",
       "skillPath": "skills/golang-troubleshooting/SKILL.md",
       "computedHash": "c234f844f87c46cd6ab66f1ba2b2fad54997c03a78b441d7ab39d94649589ff3"
+    },
+    "jit-compilation": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "18f29518a47fda070e6ec1268cb577692fae9a10",
+      "sourceType": "github",
+      "skillPath": "skills/compiler-internals/jit-compilation/SKILL.md",
+      "computedHash": "8103d6b3d8932cd9e255c6c75877e7b2ea747fa708df3bd3617da3c2d6f23b45"
+    },
+    "linkers-lto": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "18f29518a47fda070e6ec1268cb577692fae9a10",
+      "sourceType": "github",
+      "skillPath": "skills/binaries/linkers-lto/SKILL.md",
+      "computedHash": "c73e8343088edcceb4d4d504ad7a2b79c7cbbf61cf195b01c1990862a7b46c3a"
+    },
+    "lldb": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "commit": "18f29518a47fda070e6ec1268cb577692fae9a10",
+      "sourceType": "github",
+      "skillPath": "skills/debuggers/lldb/SKILL.md",
+      "computedHash": "6ed0cbe3e5e2d0ce9b2766d4ba75e76f99c783b2740745b8edfb23a33216c701"
+    },
+    "rev-unicorn-debug": {
+      "source": "P4nda0s/reverse-skills",
+      "commit": "a2baa31c58a3567977188414da68c8c842057152",
+      "sourceType": "github",
+      "skillPath": "skills/rev-unicorn-debug/SKILL.md",
+      "computedHash": "0bdd44f0a2e8033fce9e50ba85819e6f69c1c5f7ccdc30746cc07e40662b5395"
     },
     "swift-concurrency": {
       "source": "AvdLee/Swift-Concurrency-Agent-Skill",
