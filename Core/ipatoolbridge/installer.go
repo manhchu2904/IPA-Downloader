@@ -59,9 +59,9 @@ var (
 	activeTLSServer  *http.Server
 )
 
-const localInstallerHost = "app.localhost.qaq.wiki"
+const localInstallerHost = "127.0.0.1"
 
-// InspectIPA reads Payload/*.app/Info.plist inside an .ipa archive without extracting it.
+// InspectIPA reads the app bundle Info.plist inside an .ipa archive without extracting it.
 func (c *Client) InspectIPA(ipaPath string) (string, error) {
 	meta, err := inspectIPAFile(ipaPath)
 	if err != nil {
@@ -440,10 +440,10 @@ func (c *Client) ensureInstallerCertificates() ([]byte, tls.Certificate, error) 
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject: pkix.Name{
-			CommonName:   localInstallerHost,
+			CommonName:   "127.0.0.1",
 			Organization: []string{"IPA Downloader"},
 		},
-		DNSNames:              []string{localInstallerHost, "localhost"},
+		DNSNames:              []string{"localhost"},
 		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore:             now,
 		NotAfter:              now.Add(820 * 24 * time.Hour),

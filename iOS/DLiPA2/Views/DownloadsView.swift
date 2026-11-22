@@ -614,7 +614,7 @@ private struct IPAInstallerSheet: View {
                         Text("Chế độ máy chủ OTA")
                     } footer: {
                         Text(useLocalHTTPSMode
-                             ? "Chế độ HTTPS Cục bộ (app.localhost.qaq.wiki) hoạt động 100% offline. Lần đầu sử dụng chế độ này, hãy bấm 'Tải chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
+                             ? "Chế độ HTTPS Cục bộ (https://127.0.0.1) hoạt động 100% offline không cần DNS ngoài. Lần đầu sử dụng chế độ này, hãy bấm 'Tải chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
                              : "Chế độ Trực tiếp không cần cài chứng chỉ CA. Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong).")
                     }
                 }
