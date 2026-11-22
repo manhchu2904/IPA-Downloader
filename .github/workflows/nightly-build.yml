@@ -1,8 +1,11 @@
-name: Build IPA Downloader iOS IPA
+name: Nightly Build
 
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       configuration:
@@ -14,18 +17,39 @@ on:
           - Release
           - Debug
 
+permissions:
+  contents: read
+
 jobs:
-  build-ios:
+  nightly-ios:
+    name: Build Nightly IPA
     runs-on: macos-15
     env:
       BUILD_CONFIG: ${{ inputs.configuration || 'Release' }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Stamp Nightly build version into Info.plist
+        id: version
+        run: |
+          BASE_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" iOS/DLiPA2/Info.plist)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          NIGHTLY_VERSION="${BASE_VERSION}-nightly.${SHORT_SHA}"
+          BUILD_NUMBER="${{ github.run_number }}"
+
+          echo "Nightly Version: ${NIGHTLY_VERSION} (Build: ${BUILD_NUMBER})"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${NIGHTLY_VERSION}" iOS/DLiPA2/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" iOS/DLiPA2/Info.plist
+
+          echo "nightly_version=${NIGHTLY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
 
@@ -62,21 +86,24 @@ jobs:
             -sdk iphoneos \
             -arch arm64 \
             -derivedDataPath build \
+            MARKETING_VERSION="${{ steps.version.outputs.nightly_version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build_number }}" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             clean build
 
-      - name: Package unsigned IPA
+      - name: Package Nightly IPA
         working-directory: iOS
         run: |
           mkdir -p dist/Payload
           cp -R "build/Build/Products/${BUILD_CONFIG}-iphoneos/DLiPA2.app" dist/Payload/
           cd dist
-          zip -r "../IPADownloader-${BUILD_CONFIG}.ipa" Payload
+          zip -r "../IPADownloader-Nightly-${{ steps.version.outputs.short_sha }}-${BUILD_CONFIG}.ipa" Payload
 
-      - name: Upload IPA Downloader IPA artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Nightly IPA artifact
+        uses: actions/upload-artifact@v6
         with:
-          name: IPADownloader-iOS-${{ env.BUILD_CONFIG }}-IPA
-          path: iOS/IPADownloader-${{ env.BUILD_CONFIG }}.ipa
+          name: IPADownloader-Nightly-${{ steps.version.outputs.short_sha }}-${{ env.BUILD_CONFIG }}-IPA
+          path: iOS/IPADownloader-Nightly-${{ steps.version.outputs.short_sha }}-${{ env.BUILD_CONFIG }}.ipa
+          retention-days: 14

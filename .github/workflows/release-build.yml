@@ -1,0 +1,130 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag (e.g. v1.0.1 or 1.0.1)"
+        required: true
+        default: "v1.0.0"
+        type: string
+      create_release:
+        description: "Publish to GitHub Releases"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release-ios:
+    name: Build & Package Release IPA
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version and inject into Info.plist
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW_TAG="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            RAW_TAG="${{ inputs.version }}"
+          else
+            RAW_TAG=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" iOS/DLiPA2/Info.plist)
+          fi
+
+          APP_VERSION="${RAW_TAG#v}"
+          if [[ "$RAW_TAG" == v* ]]; then
+            RELEASE_TAG="$RAW_TAG"
+          else
+            RELEASE_TAG="v${APP_VERSION}"
+          fi
+          BUILD_NUMBER="${{ github.run_number }}"
+
+          echo "Resolved Version: ${APP_VERSION} (Tag: ${RELEASE_TAG}, Build: ${BUILD_NUMBER})"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" iOS/DLiPA2/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" iOS/DLiPA2/Info.plist
+
+          echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+
+      - name: Install build tools (cmake, xcodegen, gomobile)
+        run: |
+          brew install cmake xcodegen
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize gomobile
+        run: gomobile init
+
+      - name: Build libunicorn.a and Ipatoolbridge.xcframework (Release)
+        run: |
+          chmod +x scripts/build-xcframework.sh
+          ./scripts/build-xcframework.sh
+
+      - name: Generate Xcode project
+        working-directory: iOS
+        run: xcodegen generate
+
+      - name: Build unsigned iOS app (Release, arm64)
+        working-directory: iOS
+        run: |
+          xcodebuild \
+            -project DLiPA2.xcodeproj \
+            -scheme DLiPA2 \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath build \
+            MARKETING_VERSION="${{ steps.version.outputs.app_version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build_number }}" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Package Release IPA
+        working-directory: iOS
+        run: |
+          mkdir -p dist/Payload
+          cp -R "build/Build/Products/Release-iphoneos/DLiPA2.app" dist/Payload/
+          cd dist
+          IPA_NAME="IPADownloader-v${{ steps.version.outputs.app_version }}.ipa"
+          zip -r "../${IPA_NAME}" Payload
+          shasum -a 256 "../${IPA_NAME}" > "../${IPA_NAME}.sha256"
+
+      - name: Upload Release IPA artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: IPADownloader-v${{ steps.version.outputs.app_version }}-Release-IPA
+          path: |
+            iOS/IPADownloader-v${{ steps.version.outputs.app_version }}.ipa
+            iOS/IPADownloader-v${{ steps.version.outputs.app_version }}.ipa.sha256
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag' || inputs.create_release == true
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          name: "IPA Downloader v${{ steps.version.outputs.app_version }}"
+          generate_release_notes: true
+          files: |
+            iOS/IPADownloader-v${{ steps.version.outputs.app_version }}.ipa
+            iOS/IPADownloader-v${{ steps.version.outputs.app_version }}.ipa.sha256
