@@ -3,9 +3,9 @@ package ipatoolbridge
 import (
 	"archive/zip"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -60,7 +61,15 @@ var (
 	caDownloadedFlag int32
 )
 
-const localInstallerHost = "127.0.0.1"
+const localInstallerHost = "localhost"
+
+// ResetInstallerCertificates deletes cached local CA and leaf certificates so a fresh pair is generated on next use.
+func (c *Client) ResetInstallerCertificates() error {
+	c.StopIPAInstaller()
+	atomic.StoreInt32(&caDownloadedFlag, 0)
+	certDir := filepath.Join(c.baseDir, "installer_certs")
+	return os.RemoveAll(certDir)
+}
 
 // HasServedCACert returns true if the local ca.crt endpoint has been requested by Safari at least once in this session or recorded on disk.
 func (c *Client) HasServedCACert() bool {
@@ -191,13 +200,13 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 		return "", fmt.Errorf("prepare installer TLS certificates: %w", err)
 	}
 
-	httpLn, err := net.Listen("tcp", "0.0.0.0:0")
+	httpLn, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return "", fmt.Errorf("listen local HTTP: %w", err)
 	}
 	httpPort := httpLn.Addr().(*net.TCPAddr).Port
 
-	httpsLn, err := net.Listen("tcp", "0.0.0.0:0")
+	httpsLn, err := net.Listen("tcp", ":0")
 	if err != nil {
 		_ = httpLn.Close()
 		return "", fmt.Errorf("listen local HTTPS: %w", err)
@@ -217,8 +226,8 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	externalManifestURL := "https://api.palera.in/genPlist?" + genParams.Encode()
 	directITMSURL := "itms-services://?action=download-manifest&url=" + url.QueryEscape(externalManifestURL)
 
-	// Method 2: 100% Local Offline HTTPS manifest (using local Root CA)
-	localHTTPSITMSURL := "itms-services://?action=download-manifest&url=" + url.QueryEscape(httpsManifestURL)
+	// Method 2: 100% Local Offline HTTPS manifest (using local Root CA and localhost SNI, unescaped like Feather)
+	localHTTPSITMSURL := "itms-services://?action=download-manifest&url=" + httpsManifestURL
 
 	safariInstallURL := fmt.Sprintf("http://127.0.0.1:%d/install", httpPort)
 	caCertURL := fmt.Sprintf("http://127.0.0.1:%d/ca.crt", httpPort)
@@ -251,18 +260,21 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	mux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
 		c.markCACertServed()
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA.crt\"")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA-v2.crt\"")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(caCertDER)
 	})
 	mux.HandleFunc("/manifest.plist", func(w http.ResponseWriter, r *http.Request) {
 		notify("sending_manifest", 0, meta.FileSize, 0.02)
-		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+		body := httpManifestXML
 		if r.TLS != nil {
-			_, _ = w.Write(localManifestXML)
-		} else {
-			_, _ = w.Write(httpManifestXML)
+			body = localManifestXML
+		}
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+		w.WriteHeader(http.StatusOK)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(body)
 		}
 	})
 	mux.HandleFunc("/install", func(w http.ResponseWriter, r *http.Request) {
@@ -314,10 +326,14 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
 		MinVersion:   tls.VersionTLS12,
+		NextProtos:   []string{"http/1.1"},
 	}
 	httpsSrv := &http.Server{
 		Handler:   mux,
 		TLSConfig: tlsConfig,
+		ErrorLog: log.New(&tlsLogWriter{onMessage: func(msg string) {
+			notify("tls_error:"+msg, 0, meta.FileSize, 0)
+		}}, "", 0),
 	}
 
 	installerMu.Lock()
@@ -378,13 +394,13 @@ func (c *Client) StartCACertServer() (string, error) {
 		return "", fmt.Errorf("prepare installer CA certificate: %w", err)
 	}
 
-	httpLn, err := net.Listen("tcp", "0.0.0.0:0")
+	httpLn, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return "", fmt.Errorf("listen local HTTP: %w", err)
 	}
 	httpPort := httpLn.Addr().(*net.TCPAddr).Port
 
-	httpsLn, err := net.Listen("tcp", "0.0.0.0:0")
+	httpsLn, err := net.Listen("tcp", ":0")
 	if err != nil {
 		_ = httpLn.Close()
 		return "", fmt.Errorf("listen local HTTPS: %w", err)
@@ -399,7 +415,7 @@ func (c *Client) StartCACertServer() (string, error) {
 	mux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
 		c.markCACertServed()
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA.crt\"")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA-v2.crt\"")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(caCertDER)
 	})
@@ -408,6 +424,7 @@ func (c *Client) StartCACertServer() (string, error) {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
 		MinVersion:   tls.VersionTLS12,
+		NextProtos:   []string{"http/1.1"},
 	}
 	httpsSrv := &http.Server{
 		Handler:   mux,
@@ -505,81 +522,116 @@ func (c *Client) ensureInstallerRawDERs() ([]byte, []byte, error) {
 	return caDER, pair.Certificate[0], nil
 }
 
+type tlsLogWriter struct {
+	onMessage func(string)
+}
+
+func (w *tlsLogWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimSpace(string(p))
+	if msg != "" && w.onMessage != nil {
+		w.onMessage(msg)
+	}
+	return len(p), nil
+}
+
+func randomCertSerial() *big.Int {
+	limit := new(big.Int).Lsh(big.NewInt(1), 128)
+	n, err := rand.Int(rand.Reader, limit)
+	if err != nil || n.Sign() <= 0 {
+		return big.NewInt(time.Now().UnixNano())
+	}
+	return n
+}
+
 func (c *Client) ensureInstallerCertificates() ([]byte, tls.Certificate, error) {
 	certDir := filepath.Join(c.baseDir, "installer_certs")
 	if err := os.MkdirAll(certDir, 0o700); err != nil {
 		return nil, tls.Certificate{}, err
 	}
 	caCertPath := filepath.Join(certDir, "ca.crt")
+	caKeyPath := filepath.Join(certDir, "ca-key.pem")
 	leafCertPath := filepath.Join(certDir, "leaf.pem")
 	leafKeyPath := filepath.Join(certDir, "leaf-key.pem")
+	versionFlagPath := filepath.Join(certDir, "cert_v2.flag")
 
-	if caDER, err := os.ReadFile(caCertPath); err == nil {
-		if pair, err := tls.LoadX509KeyPair(leafCertPath, leafKeyPath); err == nil {
-			return caDER, pair, nil
+	if _, err := os.Stat(versionFlagPath); err == nil {
+		if caDER, err := os.ReadFile(caCertPath); err == nil {
+			if pair, err := tls.LoadX509KeyPair(leafCertPath, leafKeyPath); err == nil && len(pair.Certificate) > 0 {
+				if parsedLeaf, err := x509.ParseCertificate(pair.Certificate[0]); err == nil && parsedLeaf.NotAfter.After(time.Now().Add(7*24*time.Hour)) {
+					return caDER, pair, nil
+				}
+			}
 		}
 	}
 
 	now := time.Now().Add(-1 * time.Hour)
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, tls.Certificate{}, err
 	}
+	caSKI := sha1.Sum(x509.MarshalPKCS1PublicKey(&caKey.PublicKey))
 	caTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: randomCertSerial(),
 		Subject: pkix.Name{
-			CommonName:   "IPA Downloader Local OTA Root CA",
+			CommonName:   "IPA Downloader Local Root CA v2",
 			Organization: []string{"IPA Downloader"},
 		},
+		SubjectKeyId:          caSKI[:],
 		NotBefore:             now,
-		NotAfter:              now.Add(10 * 365 * 24 * time.Hour),
+		NotAfter:              now.AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
+		MaxPathLenZero:        true,
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
 	if err != nil {
 		return nil, tls.Certificate{}, err
 	}
-
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	parsedCA, err := x509.ParseCertificate(caDER)
 	if err != nil {
 		return nil, tls.Certificate{}, err
 	}
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, tls.Certificate{}, err
+	}
+	leafSKI := sha1.Sum(x509.MarshalPKCS1PublicKey(&leafKey.PublicKey))
 	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
+		SerialNumber: randomCertSerial(),
 		Subject: pkix.Name{
-			CommonName:   "127.0.0.1",
+			CommonName:   "localhost",
 			Organization: []string{"IPA Downloader"},
 		},
+		SubjectKeyId:          leafSKI[:],
+		AuthorityKeyId:        parsedCA.SubjectKeyId,
 		DNSNames:              []string{"localhost"},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 		NotBefore:             now,
-		NotAfter:              now.Add(820 * 24 * time.Hour),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caTemplate, &leafKey.PublicKey, caKey)
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, parsedCA, &leafKey.PublicKey, caKey)
 	if err != nil {
 		return nil, tls.Certificate{}, err
 	}
 
 	leafCertPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
-	caCertPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
-	chainPEM := append(leafCertPEM, caCertPEM...)
-
-	leafKeyBytes, err := x509.MarshalECPrivateKey(leafKey)
-	if err != nil {
-		return nil, tls.Certificate{}, err
-	}
-	leafKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: leafKeyBytes})
+	caKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(caKey)})
+	leafKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
 
 	_ = os.WriteFile(caCertPath, caDER, 0o600)
-	_ = os.WriteFile(leafCertPath, chainPEM, 0o600)
+	_ = os.WriteFile(caKeyPath, caKeyPEM, 0o600)
+	_ = os.WriteFile(leafCertPath, leafCertPEM, 0o600)
 	_ = os.WriteFile(leafKeyPath, leafKeyPEM, 0o600)
+	_ = os.WriteFile(versionFlagPath, []byte("v2"), 0o600)
+	_ = os.Remove(filepath.Join(certDir, "ca_downloaded.flag"))
+	atomic.StoreInt32(&caDownloadedFlag, 0)
 
-	pair, err := tls.X509KeyPair(chainPEM, leafKeyPEM)
+	pair, err := tls.X509KeyPair(leafCertPEM, leafKeyPEM)
 	if err != nil {
 		return nil, tls.Certificate{}, err
 	}

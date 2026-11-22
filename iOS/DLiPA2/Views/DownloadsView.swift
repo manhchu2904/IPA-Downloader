@@ -536,14 +536,14 @@ private struct IPAInstallerSheet: View {
                     }
                     infoRow(title: "Dung lượng", value: file.formattedSize)
                     infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
-                    infoRow(title: "Chế độ OTA", value: useLocalHTTPSMode ? "HTTPS Cục bộ (127.0.0.1)" : "Trực tiếp")
+                    infoRow(title: "Chế độ OTA", value: useLocalHTTPSMode ? "HTTPS Cục bộ (localhost)" : "Trực tiếp")
                 }
 
                 Section {
                     if isStarting {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Đang khởi tạo máy chủ cài đặt cục bộ (127.0.0.1)...")
+                            Text("Đang khởi tạo máy chủ cài đặt cục bộ (localhost)...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -562,7 +562,7 @@ private struct IPAInstallerSheet: View {
                                         .fontWeight(.semibold)
                                         .foregroundColor(.orange)
                                 }
-                                Text("iOS sẽ báo 'Không thể kết nối đến 127.0.0.1' nếu chứng chỉ CA cục bộ chưa được cài và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ.")
+                                Text("Hãy cài hồ sơ 'IPA Downloader Local Root CA v2' và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
 
@@ -571,8 +571,28 @@ private struct IPAInstallerSheet: View {
                                         UIApplication.shared.open(url)
                                     }
                                 } label: {
-                                    Label("Tải chứng chỉ CA cục bộ qua Safari", systemImage: "arrow.down.doc.fill")
+                                    Label("Tải chứng chỉ CA cục bộ (v2) qua Safari", systemImage: "arrow.down.doc.fill")
                                         .font(.subheadline)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        if useLocalHTTPSMode, let tlsDiag = service.installTLSDiagnostic {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Chẩn đoán TLS cục bộ", systemImage: "exclamationmark.shield.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.red)
+                                Text(tlsDiag)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Button {
+                                    useLocalHTTPSMode = false
+                                    service.installTLSDiagnostic = nil
+                                    triggerITMSInstall(session: session)
+                                } label: {
+                                    Label("Chuyển sang Chế độ Trực tiếp & Cài ngay", systemImage: "bolt.fill")
+                                        .font(.caption.weight(.semibold))
                                 }
                             }
                             .padding(.vertical, 4)
@@ -716,7 +736,16 @@ private struct IPAInstallerSheet: View {
             let started = try await service.startIPAInstaller(for: file)
             session = started
             isStarting = false
-            triggerITMSInstall(session: started)
+            if useLocalHTTPSMode {
+                if service.localCATrustState == .trusted {
+                    if let diagErr = await service.verifyLocalHTTPSLoopback(httpsPort: started.httpsPort) {
+                        service.installTLSDiagnostic = diagErr
+                    }
+                    triggerITMSInstall(session: started)
+                }
+            } else {
+                triggerITMSInstall(session: started)
+            }
         } catch {
             errorMessage = error.localizedDescription
             isStarting = false
