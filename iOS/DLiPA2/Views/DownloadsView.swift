@@ -552,6 +552,32 @@ private struct IPAInstallerSheet: View {
                             .foregroundColor(.red)
                             .font(.subheadline)
                     } else if let session {
+                        if useLocalHTTPSMode && service.localCATrustState != .trusted {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text(service.localCATrustState.title)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                                Text("iOS sẽ báo 'Không thể kết nối đến 127.0.0.1' nếu chứng chỉ CA cục bộ chưa được cài và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                Button {
+                                    if let url = URL(string: session.caCertUrl) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    Label("Tải chứng chỉ CA cục bộ qua Safari", systemImage: "arrow.down.doc.fill")
+                                        .font(.subheadline)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
                                 Image(systemName: statusIcon)
@@ -621,7 +647,13 @@ private struct IPAInstallerSheet: View {
                 }
             }
             .task {
+                await service.refreshLocalCATrustState()
                 await startServer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
             }
             .onDisappear {
                 service.stopIPAInstaller()

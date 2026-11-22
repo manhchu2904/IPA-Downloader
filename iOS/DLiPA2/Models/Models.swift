@@ -99,3 +99,36 @@ struct InstallSession: Codable, Identifiable {
     let safariInstallUrl: String
     let caCertUrl: String
 }
+
+enum LocalCACertTrustState: Equatable {
+    case notInstalled
+    case profileDownloadedNotTrusted
+    case trusted
+
+    var title: String {
+        switch self {
+        case .notInstalled:
+            return "Chưa tải / Chưa cài hồ sơ"
+        case .profileDownloadedNotTrusted:
+            return "Đã tải hồ sơ • Chưa bật Tin cậy"
+        case .trusted:
+            return "Đã cài đặt & Đã tin cậy"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .notInstalled:
+            return "xmark.shield.fill"
+        case .profileDownloadedNotTrusted:
+            return "exclamationmark.shield.fill"
+        case .trusted:
+            return "checkmark.shield.fill"
+        }
+    }
+}
+
+struct InstallerCertChainPayload: Codable {
+    let caDer: Data
+    let leafDer: Data
+}

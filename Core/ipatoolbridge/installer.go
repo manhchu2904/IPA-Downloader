@@ -57,9 +57,26 @@ var (
 	installerMu      sync.Mutex
 	activeHTTPServer *http.Server
 	activeTLSServer  *http.Server
+	caDownloadedFlag int32
 )
 
 const localInstallerHost = "127.0.0.1"
+
+// HasServedCACert returns true if the local ca.crt endpoint has been requested by Safari at least once in this session or recorded on disk.
+func (c *Client) HasServedCACert() bool {
+	if atomic.LoadInt32(&caDownloadedFlag) == 1 {
+		return true
+	}
+	marker := filepath.Join(c.baseDir, "installer_certs", "ca_downloaded.flag")
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
+func (c *Client) markCACertServed() {
+	atomic.StoreInt32(&caDownloadedFlag, 1)
+	marker := filepath.Join(c.baseDir, "installer_certs", "ca_downloaded.flag")
+	_ = os.WriteFile(marker, []byte("1"), 0o600)
+}
 
 // InspectIPA reads the app bundle Info.plist inside an .ipa archive without extracting it.
 func (c *Client) InspectIPA(ipaPath string) (string, error) {
@@ -232,6 +249,7 @@ func (c *Client) StartIPAInstaller(ipaPath string, listener InstallProgressListe
 		_, _ = w.Write([]byte("pong"))
 	})
 	mux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
+		c.markCACertServed()
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA.crt\"")
 		w.WriteHeader(http.StatusOK)
@@ -351,11 +369,11 @@ func (c *Client) StopIPAInstaller() {
 	}
 }
 
-// StartCACertServer launches a lightweight local HTTP server on 127.0.0.1 to serve the local Root CA certificate for Safari profile installation.
+// StartCACertServer launches a lightweight local HTTP + HTTPS server on 127.0.0.1 to serve the local Root CA certificate and allow iOS SecTrust verification.
 func (c *Client) StartCACertServer() (string, error) {
 	c.StopIPAInstaller()
 
-	caCertDER, _, err := c.ensureInstallerCertificates()
+	caCertDER, tlsCert, err := c.ensureInstallerCertificates()
 	if err != nil {
 		return "", fmt.Errorf("prepare installer CA certificate: %w", err)
 	}
@@ -366,8 +384,20 @@ func (c *Client) StartCACertServer() (string, error) {
 	}
 	httpPort := httpLn.Addr().(*net.TCPAddr).Port
 
+	httpsLn, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		_ = httpLn.Close()
+		return "", fmt.Errorf("listen local HTTPS: %w", err)
+	}
+	httpsPort := httpsLn.Addr().(*net.TCPAddr).Port
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("pong"))
+	})
 	mux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
+		c.markCACertServed()
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 		w.Header().Set("Content-Disposition", "attachment; filename=\"IPADownloader-LocalCA.crt\"")
 		w.WriteHeader(http.StatusOK)
@@ -375,15 +405,48 @@ func (c *Client) StartCACertServer() (string, error) {
 	})
 
 	httpSrv := &http.Server{Handler: mux}
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	httpsSrv := &http.Server{
+		Handler:   mux,
+		TLSConfig: tlsConfig,
+	}
+
 	installerMu.Lock()
 	activeHTTPServer = httpSrv
+	activeTLSServer = httpsSrv
 	installerMu.Unlock()
 
 	go func() {
 		_ = httpSrv.Serve(httpLn)
 	}()
+	go func() {
+		_ = httpsSrv.Serve(tls.NewListener(httpsLn, tlsConfig))
+	}()
 
-	return fmt.Sprintf("http://127.0.0.1:%d/ca.crt", httpPort), nil
+	dto := InstallSessionDTO{
+		HTTPPort:  httpPort,
+		HTTPSPort: httpsPort,
+		CACertURL: fmt.Sprintf("http://127.0.0.1:%d/ca.crt", httpPort),
+	}
+	b, err := json.Marshal(dto)
+	return string(b), err
+}
+
+// GetInstallerCertChainJSON ensures the local Root CA and 127.0.0.1 leaf certificate exist on disk and returns their base64 DER representations so Swift SecTrust can evaluate iOS system trust without opening a socket.
+func (c *Client) GetInstallerCertChainJSON() (string, error) {
+	caDER, leafDER, err := c.ensureInstallerRawDERs()
+	if err != nil {
+		return "", err
+	}
+	payload := map[string][]byte{
+		"caDer":   caDER,
+		"leafDer": leafDER,
+	}
+	b, err := json.Marshal(payload)
+	return string(b), err
 }
 
 type progressResponseWriter struct {
@@ -429,6 +492,17 @@ func buildOTAManifestXML(meta ipaMetadata, packageURL string) ([]byte, error) {
 		},
 	}
 	return plist.Marshal(manifest, plist.XMLFormat)
+}
+
+func (c *Client) ensureInstallerRawDERs() ([]byte, []byte, error) {
+	caDER, pair, err := c.ensureInstallerCertificates()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pair.Certificate) == 0 {
+		return nil, nil, fmt.Errorf("empty TLS leaf certificate")
+	}
+	return caDER, pair.Certificate[0], nil
 }
 
 func (c *Client) ensureInstallerCertificates() ([]byte, tls.Certificate, error) {

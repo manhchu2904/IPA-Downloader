@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Security
 import Ipatoolbridge
 
 @MainActor
@@ -9,6 +10,8 @@ final class IPAToolService: ObservableObject {
     @Published var activeDownloads: [ActiveDownload] = []
     @Published var downloadedFiles: [DownloadedIPA] = []
     @Published var activeInstallSession: InstallSession?
+    @Published var isCACertServerRunning: Bool = false
+    @Published var localCATrustState: LocalCACertTrustState = .notInstalled
     @Published var installStage: String = "ready"
     @Published var installSentBytes: Int64 = 0
     @Published var installTotalBytes: Int64 = 0
@@ -69,6 +72,7 @@ final class IPAToolService: ObservableObject {
             Task {
                 await refreshAccounts()
                 refreshDownloadedFiles()
+                await refreshLocalCATrustState()
                 await prepareRuntimeIfNeeded()
             }
         } catch {
@@ -294,7 +298,7 @@ final class IPAToolService: ObservableObject {
     }
 
     var hasActiveDownloads: Bool {
-        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil } || activeInstallSession != nil
+        activeDownloads.contains { !$0.isCompleted && $0.errorMessage == nil } || activeInstallSession != nil || isCACertServerRunning
     }
 
     func listVersions(for app: AppItem, platform: String = "iphone", purchaseIfNeeded: Bool = false) async throws -> VersionHistory {
@@ -578,6 +582,7 @@ final class IPAToolService: ObservableObject {
     func stopIPAInstaller() {
         client?.stopIPAInstaller()
         activeInstallSession = nil
+        isCACertServerRunning = false
         installStage = "ready"
         installPercent = 0
         BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
@@ -587,13 +592,60 @@ final class IPAToolService: ObservableObject {
         guard let client else {
             throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
-        let urlStr = try await runBridge { errPtr in
+        isCACertServerRunning = true
+        BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
+
+        let jsonStr = try await runBridge { errPtr in
             client.startCACertServer(errPtr)
         }
-        guard let url = URL(string: urlStr) else {
+        let dto = try decoder.decode(InstallSession.self, from: Data(jsonStr.utf8))
+        guard let url = URL(string: dto.caCertUrl) else {
+            isCACertServerRunning = false
+            BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: hasActiveDownloads)
             throw NSError(domain: "IPADownloader", code: -3, userInfo: [NSLocalizedDescriptionKey: "Invalid CA certificate URL"])
         }
+        await refreshLocalCATrustState()
         return url
+    }
+
+    func refreshLocalCATrustState() async {
+        guard let client else { return }
+        do {
+            let jsonStr = try await runBridge { errPtr in
+                client.getInstallerCertChainJSON(errPtr)
+            }
+            let payload = try decoder.decode(InstallerCertChainPayload.self, from: Data(jsonStr.utf8))
+            let hasDownloadedProfile = client.hasServedCACert()
+            let isSystemTrusted = Self.evaluateLocalTLSLeafTrust(leafDER: payload.leafDer, caDER: payload.caDer)
+            if isSystemTrusted {
+                self.localCATrustState = .trusted
+                if self.isCACertServerRunning && self.activeInstallSession == nil {
+                    self.isCACertServerRunning = false
+                    BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: self.hasActiveDownloads)
+                }
+            } else if hasDownloadedProfile {
+                self.localCATrustState = .profileDownloadedNotTrusted
+            } else {
+                self.localCATrustState = .notInstalled
+            }
+        } catch {
+            self.localCATrustState = .notInstalled
+        }
+    }
+
+    private nonisolated static func evaluateLocalTLSLeafTrust(leafDER: Data, caDER: Data) -> Bool {
+        guard let leafCert = SecCertificateCreateWithData(nil, leafDER as CFData),
+              let caCert = SecCertificateCreateWithData(nil, caDER as CFData) else {
+            return false
+        }
+        let policy = SecPolicyCreateSSL(true, "127.0.0.1" as CFString)
+        var trust: SecTrust?
+        let status = SecTrustCreateWithCertificates([leafCert, caCert] as CFArray, policy, &trust)
+        guard status == errSecSuccess, let trust else {
+            return false
+        }
+        var cfError: CFError?
+        return SecTrustEvaluateWithError(trust, &cfError)
     }
 
     // MARK: - Helpers

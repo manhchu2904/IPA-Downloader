@@ -153,11 +153,36 @@ struct AccountsView: View {
                     }
 
                     if otaUseLocalHTTPS {
+                        HStack {
+                            Label("Chứng chỉ CA cục bộ", systemImage: service.localCATrustState.iconName)
+                                .font(.subheadline)
+                                .foregroundColor(localCATrustColor)
+                            Spacer(minLength: 8)
+                            Text(service.localCATrustState.title)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(localCATrustColor)
+                            Button {
+                                Task {
+                                    await service.refreshLocalCATrustState()
+                                }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+
                         Button {
                             openLocalCACertInSafari()
                         } label: {
-                            Label("Tải & Cài đặt chứng chỉ CA cục bộ", systemImage: "checkmark.shield")
-                                .font(.subheadline)
+                            Label(
+                                service.localCATrustState == .trusted
+                                    ? "Tải lại chứng chỉ CA cục bộ"
+                                    : "Tải & Cài đặt chứng chỉ CA cục bộ",
+                                systemImage: "arrow.down.doc.fill"
+                            )
+                            .font(.subheadline)
                         }
                     }
                 } header: {
@@ -257,9 +282,15 @@ struct AccountsView: View {
             .onAppear {
                 jitEnabled = JITHelper.isJITEnabled()
                 jitPoolReady = JITHelper.isJITPoolReady()
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 refreshJITState()
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
             }
             .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
                 Button("Đóng", role: .cancel) {}
@@ -276,6 +307,17 @@ struct AccountsView: View {
 
     private var appBuild: String {
         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "1"
+    }
+
+    private var localCATrustColor: Color {
+        switch service.localCATrustState {
+        case .trusted:
+            return .green
+        case .profileDownloadedNotTrusted:
+            return .orange
+        case .notInstalled:
+            return .red
+        }
     }
 
     private func refreshJITState() {
