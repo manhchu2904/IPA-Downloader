@@ -1,124 +1,323 @@
 import SwiftUI
+import UIKit
 
 struct AccountsView: View {
     @EnvironmentObject private var service: IPAToolService
     @State private var showAddSheet = false
     @State private var showDebugLog = false
     @State private var errorAlert: String?
+    @State private var accountToRemove: AppleAccount?
     @State private var jitEnabled = JITHelper.isJITEnabled()
     @State private var jitPoolReady = JITHelper.isJITPoolReady()
     @AppStorage("otaUseLocalHTTPS") private var otaUseLocalHTTPS = false
 
     var body: some View {
         NavigationView {
-            List {
-                Section("Trạng thái JIT (Unicorn SAP)") {
-                    HStack {
-                        Image(systemName: jitEnabled ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(jitEnabled ? .green : .orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(jitEnabled ? "JIT đang bật (CS_DEBUGGED)" : "JIT chưa được bật")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • Pool: \(jitPoolReady ? "Sẵn sàng (32 MB)" : "Chưa cấp phát")")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Button {
-                            refreshJITState()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    if !jitEnabled {
-                        Text("Hãy mở IPA Downloader qua StikDebug (chọn Universal Script trên iOS 26+) để kích hoạt JIT trước khi bấm Đăng nhập.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Button {
-                        showDebugLog = true
-                    } label: {
-                        Label("Xem / Copy Debug Log", systemImage: "doc.text.magnifyingglass")
-                    }
-                }
+            ZStack {
+                AppTheme.groupedBackground
+                    .ignoresSafeArea()
 
-                if let initError = service.initError {
-                    Section("Lỗi khởi tạo Core") {
-                        Text(initError)
-                            .foregroundColor(.red)
-                            .font(.footnote)
-                    }
-                }
-
-                Section {
-                    if service.accounts.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "person.badge.plus")
-                                .font(.system(size: 36))
-                                .foregroundColor(.secondary)
-                            Text("Chưa có tài khoản Apple ID nào")
-                                .font(.headline)
-                            Text("Thêm tài khoản Apple ID của bạn để tìm kiếm và tải file .ipa trực tiếp từ App Store.")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                    } else {
-                        ForEach(service.accounts) { account in
-                            Button {
-                                service.selectedAccountId = account.id
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(account.displayName)
-                                            .font(.headline)
-                                            .foregroundColor(.primary)
-                                        Text(account.email)
+                ScrollView {
+                    VStack(spacing: 18) {
+                        if let initError = service.initError {
+                            ModernCard(padding: 14, cornerRadius: 16) {
+                                HStack(spacing: 10) {
+                                    ModernIconBadge(systemName: "exclamationmark.octagon.fill", gradient: AppTheme.coralGradient, size: 34, cornerRadius: 10)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Lỗi khởi tạo Core")
                                             .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                        Text("Storefront: \(account.storefrontCountryCode)")
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.red)
+                                        Text(initError)
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    if service.selectedAccount?.id == account.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.accentColor)
-                                            .font(.title3)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        do {
-                                            try await service.removeAccount(account)
-                                        } catch {
-                                            errorAlert = error.localizedDescription
-                                        }
-                                    }
-                                } label: {
-                                    Label("Đăng xuất", systemImage: "trash")
                                 }
                             }
                         }
-                    }
-                } header: {
-                    Text("Tài khoản đã đăng nhập")
-                } footer: {
-                    Text("Thông tin đăng nhập được lưu cục bộ trên thiết bị và chỉ giao tiếp trực tiếp với máy chủ Apple.")
-                }
 
-                Section {
-                    HStack {
-                        Label("Phương thức cài đặt", systemImage: "iphone.and.arrow.forward")
+                        accountsSection
+                        jitStatusSection
+                        otaSettingsSection
+                        aboutSection
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 28)
+                }
+            }
+            .navigationTitle("Tài khoản")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showAddSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddSheet) {
+                AddAccountSheet()
+                    .environmentObject(service)
+            }
+            .sheet(isPresented: $showDebugLog) {
+                DebugLogView()
+            }
+            .onAppear {
+                jitEnabled = JITHelper.isJITEnabled()
+                jitPoolReady = JITHelper.isJITPoolReady()
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshJITState()
+                Task {
+                    await service.refreshLocalCATrustState()
+                }
+            }
+            .alert("Đăng xuất Apple ID?", isPresented: Binding(
+                get: { accountToRemove != nil },
+                set: { if !$0 { accountToRemove = nil } }
+            )) {
+                Button("Đăng xuất", role: .destructive) {
+                    if let acc = accountToRemove {
+                        Task {
+                            do {
+                                try await service.removeAccount(acc)
+                            } catch {
+                                errorAlert = error.localizedDescription
+                            }
+                        }
+                    }
+                    accountToRemove = nil
+                }
+                Button("Hủy", role: .cancel) {
+                    accountToRemove = nil
+                }
+            } message: {
+                Text("Xóa phiên đăng nhập của \(accountToRemove?.email ?? "") khỏi thiết bị này? Các file .ipa đã tải vẫn được giữ nguyên.")
+            }
+            .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
+                Button("Đóng", role: .cancel) {}
+            } message: {
+                Text(errorAlert ?? "")
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    // MARK: - Sections
+
+    private var accountsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(
+                title: "Apple ID đã đăng nhập",
+                trailing: service.accounts.isEmpty ? nil : "\(service.accounts.count) tài khoản"
+            )
+
+            if service.accounts.isEmpty {
+                ModernCard(padding: 18, cornerRadius: 18) {
+                    ModernEmptyState(
+                        icon: "person.badge.plus",
+                        title: "Chưa có tài khoản Apple ID",
+                        subtitle: "Đăng nhập Apple ID để tìm kiếm và tải trực tiếp file .ipa từ App Store của Apple.",
+                        gradient: AppTheme.primaryGradient,
+                        actionTitle: "Thêm Apple ID",
+                        actionIcon: "plus",
+                        action: { showAddSheet = true }
+                    )
+                }
+            } else {
+                ModernCard(padding: 0, cornerRadius: 16) {
+                    VStack(spacing: 0) {
+                        ForEach(service.accounts) { account in
+                            accountRow(account)
+                            if account.id != service.accounts.last?.id {
+                                Divider().padding(.leading, 62)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text("Thông tin đăng nhập được lưu cục bộ trong Keychain trên thiết bị và chỉ giao tiếp trực tiếp với máy chủ Apple.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+        }
+    }
+
+    private func accountRow(_ account: AppleAccount) -> some View {
+        let isSelected = (service.selectedAccount?.id == account.id)
+        let initial = String(account.displayName.prefix(1)).uppercased()
+
+        return HStack(spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    service.selectedAccountId = account.id
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? AppTheme.primaryGradient : AppTheme.slateGradient)
+                            .frame(width: 40, height: 40)
+                        Text(initial.isEmpty ? "A" : initial)
                             .font(.subheadline)
-                        Spacer()
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(account.displayName)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                            ModernStatusPill(text: account.storefrontCountryCode, color: isSelected ? .accentColor : .secondary)
+                        }
+                        Text(account.email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.accentColor)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                accountToRemove = account
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.red)
+                    .frame(width: 30, height: 30)
+                    .background(Color.red.opacity(0.10))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contextMenu {
+            Button {
+                service.selectedAccountId = account.id
+            } label: {
+                Label("Chọn làm tài khoản mặc định", systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) {
+                accountToRemove = account
+            } label: {
+                Label("Đăng xuất", systemImage: "trash")
+            }
+        }
+    }
+
+    private var jitStatusSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(title: "Trạng thái JIT (Unicorn SAP)")
+
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        ModernIconBadge(
+                            systemName: jitEnabled ? "checkmark.shield.fill" : "exclamationmark.triangle.fill",
+                            gradient: jitEnabled ? AppTheme.emeraldGradient : AppTheme.amberGradient,
+                            size: 36,
+                            cornerRadius: 10
+                        )
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(jitEnabled ? "JIT đang bật" : "JIT chưa được bật")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                ModernStatusPill(
+                                    text: jitPoolReady ? "Pool 32 MB" : "Chưa cấp phát",
+                                    color: jitPoolReady ? .green : .orange
+                                )
+                            }
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • \(jitEnabled ? "CS_DEBUGGED" : "Cần StikDebug khi đăng nhập")")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer(minLength: 6)
+
+                        Button {
+                            refreshJITState()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.accentColor)
+                                .frame(width: 30, height: 30)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+
+                    if !jitEnabled {
+                        Divider().padding(.leading, 62)
+                        Text("Hãy mở IPA Downloader qua StikDebug (hoặc TrollStore) để kích hoạt JIT khi đăng nhập tài khoản lần đầu.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                    }
+
+                    Divider().padding(.leading, 62)
+
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ModernIconBadge(systemName: "terminal.fill", gradient: AppTheme.slateGradient, size: 30, cornerRadius: 8)
+                            Text("Xem / Copy Debug Log")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary.opacity(0.6))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var otaSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(title: "Cài đặt gói .ipa (OTA)")
+
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        ModernIconBadge(systemName: "iphone.and.arrow.forward", gradient: AppTheme.primaryGradient, size: 30, cornerRadius: 8)
+                        Text("Phương thức cài đặt")
+                            .font(.subheadline)
+                        Spacer(minLength: 8)
                         Menu {
                             Button {
                                 otaUseLocalHTTPS = false
@@ -151,155 +350,154 @@ struct AccountsView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
 
                     if otaUseLocalHTTPS {
-                        HStack {
-                            Label("Chứng chỉ CA cục bộ", systemImage: service.localCATrustState.iconName)
-                                .font(.subheadline)
-                                .foregroundColor(localCATrustColor)
+                        Divider().padding(.leading, 56)
+
+                        HStack(spacing: 12) {
+                            ModernIconBadge(
+                                systemName: service.localCATrustState.iconName,
+                                gradient: localCATrustGradient,
+                                size: 30,
+                                cornerRadius: 8
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Chứng chỉ CA cục bộ")
+                                    .font(.subheadline)
+                                Text(service.localCATrustState.title)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(localCATrustColor)
+                            }
                             Spacer(minLength: 8)
-                            Text(service.localCATrustState.title)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(localCATrustColor)
                             Button {
                                 Task {
                                     await service.refreshLocalCATrustState()
                                 }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.accentColor)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.accentColor.opacity(0.12))
+                                    .clipShape(Circle())
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+
+                        Divider().padding(.leading, 56)
 
                         Button {
                             openLocalCACertInSafari()
                         } label: {
-                            Label(
-                                service.localCATrustState == .trusted
-                                    ? "Tải lại chứng chỉ CA cục bộ"
-                                    : "Tải & Cài đặt chứng chỉ CA cục bộ",
-                                systemImage: "arrow.down.doc.fill"
-                            )
-                            .font(.subheadline)
+                            HStack(spacing: 12) {
+                                ModernIconBadge(systemName: "arrow.down.doc.fill", gradient: AppTheme.purpleGradient, size: 30, cornerRadius: 8)
+                                Text(service.localCATrustState == .trusted
+                                     ? "Tải lại chứng chỉ CA cục bộ"
+                                     : "Tải & Cài đặt chứng chỉ CA cục bộ")
+                                    .font(.subheadline)
+                                    .foregroundColor(.accentColor)
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.accentColor.opacity(0.75))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
-                } header: {
-                    Text("Cài đặt gói .ipa (OTA)")
-                } footer: {
-                    Text(otaUseLocalHTTPS
-                         ? "Chế độ HTTPS Cục bộ hoạt động trực tiếp trên mạng cục bộ. Hãy bấm 'Tải & Cài đặt chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
-                         : "Chế độ Trực tiếp không cần cài đặt chứng chỉ CA và hoạt động ngay khi nhấn nút Cài trong tab Tải xuống.")
                 }
+            }
 
-                Section {
-                    HStack {
-                        Label("Phiên bản", systemImage: "app.badge.checkmark")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("v\(appVersion) (Build \(appBuild))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+            Text(otaUseLocalHTTPS
+                 ? "Chế độ HTTPS Cục bộ hoạt động trực tiếp trên mạng cục bộ. Hãy bấm 'Tải & Cài đặt chứng chỉ CA cục bộ', cài hồ sơ trong Cài đặt và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ."
+                 : "Chế độ Trực tiếp không cần cài đặt chứng chỉ CA và hoạt động ngay khi nhấn nút Cài trong tab Tải xuống.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+        }
+    }
 
-                    HStack {
-                        Label("Core Engine", systemImage: "cpu")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("ipatool v2 • Unicorn 2.1.4")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(title: "Thông tin & Mã nguồn")
 
-                    HStack {
-                        Label("Cơ chế JIT", systemImage: "memorychip")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("Split-W^X Dual-Map (iOS \(UIDevice.current.systemVersion))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    infoRow(icon: "app.badge.checkmark", gradient: AppTheme.primaryGradient, title: "Phiên bản", value: "v\(appVersion) (Build \(appBuild))")
+                    Divider().padding(.leading, 56)
+                    infoRow(icon: "cpu", gradient: AppTheme.purpleGradient, title: "Core Engine", value: "ipatool • Unicorn 2.1.4")
+                    Divider().padding(.leading, 56)
+                    infoRow(icon: "memorychip", gradient: AppTheme.emeraldGradient, title: "Cơ chế JIT", value: "Split-W^X (iOS \(UIDevice.current.systemVersion))")
 
                     if let repoURL = URL(string: "https://github.com/manhchu2904/IPA-Downloader") {
+                        Divider().padding(.leading, 56)
                         Link(destination: repoURL) {
-                            HStack {
-                                Label("Mã nguồn (GitHub)", systemImage: "chevron.left.forwardslash.chevron.right")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("manhchu2904/IPA-Downloader")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
+                            linkRow(icon: "chevron.left.forwardslash.chevron.right", gradient: AppTheme.slateGradient, title: "Mã nguồn (GitHub)", value: "manhchu2904/IPA-Downloader")
                         }
                     }
 
                     if let ipatoolURL = URL(string: "https://github.com/majd/ipatool") {
+                        Divider().padding(.leading, 56)
                         Link(destination: ipatoolURL) {
-                            HStack {
-                                Label("Lõi ipatool gốc", systemImage: "shippingbox")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("majd/ipatool")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
+                            linkRow(icon: "shippingbox.fill", gradient: AppTheme.amberGradient, title: "Lõi ipatool gốc", value: "majd/ipatool")
                         }
                     }
-                } header: {
-                    Text("Thông tin & Mã nguồn")
-                } footer: {
-                    Text("IPA Downloader • Tải trực tiếp file .ipa nguyên bản từ máy chủ App Store của Apple.")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 4)
                 }
             }
-            .navigationTitle("Tài khoản")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showAddSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-            .sheet(isPresented: $showAddSheet) {
-                AddAccountSheet()
-                    .environmentObject(service)
-            }
-            .sheet(isPresented: $showDebugLog) {
-                DebugLogView()
-            }
-            .onAppear {
-                jitEnabled = JITHelper.isJITEnabled()
-                jitPoolReady = JITHelper.isJITPoolReady()
-                Task {
-                    await service.refreshLocalCATrustState()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                refreshJITState()
-                Task {
-                    await service.refreshLocalCATrustState()
-                }
-            }
-            .alert("Lỗi", isPresented: Binding(get: { errorAlert != nil }, set: { if !$0 { errorAlert = nil } })) {
-                Button("Đóng", role: .cancel) {}
-            } message: {
-                Text(errorAlert ?? "")
-            }
+
+            Text("IPA Downloader • Tải trực tiếp file .ipa nguyên bản từ máy chủ App Store của Apple.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
         }
-        .navigationViewStyle(.stack)
     }
+
+    private func infoRow(icon: String, gradient: LinearGradient, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            ModernIconBadge(systemName: icon, gradient: gradient, size: 30, cornerRadius: 8)
+            Text(title)
+                .font(.subheadline)
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    private func linkRow(icon: String, gradient: LinearGradient, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            ModernIconBadge(systemName: icon, gradient: gradient, size: 30, cornerRadius: 8)
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+            Image(systemName: "arrow.up.right.square")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    // MARK: - Helpers
 
     private var appVersion: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
@@ -317,6 +515,17 @@ struct AccountsView: View {
             return .orange
         case .notInstalled:
             return .red
+        }
+    }
+
+    private var localCATrustGradient: LinearGradient {
+        switch service.localCATrustState {
+        case .trusted:
+            return AppTheme.emeraldGradient
+        case .profileDownloadedNotTrusted:
+            return AppTheme.amberGradient
+        case .notInstalled:
+            return AppTheme.coralGradient
         }
     }
 
@@ -370,90 +579,156 @@ private struct AddAccountSheet: View {
 
     var body: some View {
         NavigationView {
-            Form {
-                if !JITHelper.isJITEnabled() {
-                    Section {
-                        Label("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở IPA Downloader qua StikDebug trước.", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                            .font(.footnote)
-                    }
-                }
+            ZStack {
+                AppTheme.groupedBackground
+                    .ignoresSafeArea()
 
-                Section {
-                    TextField("Email hoặc SĐT Apple ID", text: $email)
-                        .keyboardType(.emailAddress)
-                        .textContentType(.username)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .onChange(of: email) { _ in
-                            if needsTwoFactor {
-                                needsTwoFactor = false
-                                authCode = ""
+                ScrollView {
+                    VStack(spacing: 16) {
+                        VStack(spacing: 10) {
+                            ModernIconBadge(systemName: "person.crop.circle.badge.plus", gradient: AppTheme.primaryGradient, size: 58, cornerRadius: 16)
+                            Text("Đăng nhập Apple ID")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                            Text("Kết nối trực tiếp với máy chủ App Store của Apple. Không qua máy chủ trung gian.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 20)
+                        }
+                        .padding(.top, 8)
+
+                        if !JITHelper.isJITEnabled() {
+                            ModernCard(padding: 13, cornerRadius: 14) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("JIT chưa bật — bấm Đăng nhập có thể bị văng app. Hãy mở IPA Downloader qua StikDebug trước.")
+                                        .foregroundColor(.orange)
+                                        .font(.caption)
+                                    Spacer()
+                                }
                             }
-                            errorMessage = nil
                         }
 
-                    SecureField("Mật khẩu", text: $password)
-                        .textContentType(.password)
-                        .onChange(of: password) { _ in
-                            if needsTwoFactor {
-                                needsTwoFactor = false
-                                authCode = ""
+                        ModernCard(padding: 0, cornerRadius: 16) {
+                            VStack(spacing: 0) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "envelope.fill")
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 22)
+                                    TextField("Email hoặc SĐT Apple ID", text: $email)
+                                        .font(.subheadline)
+                                        .keyboardType(.emailAddress)
+                                        .textContentType(.username)
+                                        .autocapitalization(.none)
+                                        .disableAutocorrection(true)
+                                        .onChange(of: email) { _ in
+                                            if needsTwoFactor {
+                                                needsTwoFactor = false
+                                                authCode = ""
+                                            }
+                                            errorMessage = nil
+                                        }
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 13)
+
+                                Divider().padding(.leading, 46)
+
+                                HStack(spacing: 10) {
+                                    Image(systemName: "lock.fill")
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 22)
+                                    SecureField("Mật khẩu", text: $password)
+                                        .font(.subheadline)
+                                        .textContentType(.password)
+                                        .onChange(of: password) { _ in
+                                            if needsTwoFactor {
+                                                needsTwoFactor = false
+                                                authCode = ""
+                                            }
+                                            errorMessage = nil
+                                        }
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 13)
                             }
-                            errorMessage = nil
                         }
-                } header: {
-                    Text("Thông tin Apple ID")
-                } footer: {
-                    if !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isEmailFormatValid {
-                        Text("Nhập đúng định dạng email (vd: ten@icloud.com) hoặc số điện thoại để bật nút Đăng nhập.")
-                            .foregroundColor(.orange)
-                    }
-                }
 
-                if needsTwoFactor {
-                    Section {
-                        TextField("Mã xác thực 6 chữ số", text: $authCode)
-                            .keyboardType(.numberPad)
-                            .textContentType(.oneTimeCode)
-
-                        Button("Nhập lại Email / Mật khẩu") {
-                            needsTwoFactor = false
-                            authCode = ""
-                            errorMessage = nil
+                        if !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isEmailFormatValid {
+                            Text("Email hoặc số điện thoại không hợp lệ.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 6)
                         }
-                        .font(.footnote)
-                    } header: {
-                        Text("Xác thực 2 yếu tố (2FA)")
-                    } footer: {
-                        Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn.\nLưu ý: Máy chủ App Store của Apple trả về cùng một mã phản hồi cho cả trường hợp cần 2FA lẫn khi nhập sai Email/Mật khẩu. Nếu thiết bị của bạn không hiện mã 2FA, hãy kiểm tra lại Email và Mật khẩu.")
-                    }
-                }
 
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .font(.footnote)
-                    }
-                }
+                        if needsTwoFactor {
+                            ModernCard(padding: 14, cornerRadius: 16) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(spacing: 8) {
+                                        ModernIconBadge(systemName: "key.fill", gradient: AppTheme.emeraldGradient, size: 28, cornerRadius: 8)
+                                        Text("Xác thực 2 yếu tố (2FA)")
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                    }
 
-                Section {
-                    Button {
-                        performLogin()
-                    } label: {
-                        HStack {
-                            Spacer()
+                                    TextField("Nhập mã xác thực 6 chữ số", text: $authCode)
+                                        .font(.title3.monospacedDigit())
+                                        .keyboardType(.numberPad)
+                                        .textContentType(.oneTimeCode)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 10)
+                                        .background(AppTheme.subtleSurface)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                                    Text("Nhập mã 6 chữ số được gửi tới thiết bị tin cậy của bạn. Nếu không thấy mã, hãy kiểm tra lại Email và Mật khẩu.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+
+                                    Button("Nhập lại Email / Mật khẩu") {
+                                        needsTwoFactor = false
+                                        authCode = ""
+                                        errorMessage = nil
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                }
+                            }
+                        }
+
+                        if let errorMessage {
+                            ModernCard(padding: 13, cornerRadius: 14) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "xmark.octagon.fill")
+                                        .foregroundColor(.red)
+                                    Text(errorMessage)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                    Spacer()
+                                }
+                            }
+                        }
+
+                        Button {
+                            performLogin()
+                        } label: {
                             if isLoading {
-                                ProgressView()
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .tint(.white)
+                                    Text("Đang xác thực với Apple...")
+                                }
                             } else {
                                 Text(needsTwoFactor ? "Xác nhận mã 2FA" : "Đăng nhập")
-                                    .fontWeight(.semibold)
                             }
-                            Spacer()
                         }
+                        .buttonStyle(ModernPrimaryButtonStyle(isDisabled: !canSubmitLogin))
+                        .disabled(!canSubmitLogin)
+                        .padding(.top, 4)
                     }
-                    .disabled(!canSubmitLogin)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 28)
                 }
             }
             .navigationTitle("Thêm Apple ID")
@@ -501,7 +776,7 @@ private struct AddAccountSheet: View {
     private func performLogin() {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidAppleID(trimmedEmail) else {
-            errorMessage = "Apple ID không đúng định dạng. Vui lòng nhập email hợp lệ (ví dụ: ten@icloud.com) hoặc số điện thoại."
+            errorMessage = "Email hoặc số điện thoại không hợp lệ."
             return
         }
         if needsTwoFactor {
@@ -520,7 +795,9 @@ private struct AddAccountSheet: View {
             do {
                 let res = try await service.login(email: trimmedEmail, password: password, authCode: authCode)
                 if res.authCodeRequired {
-                    needsTwoFactor = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        needsTwoFactor = true
+                    }
                 } else if res.success {
                     dismiss()
                 } else {

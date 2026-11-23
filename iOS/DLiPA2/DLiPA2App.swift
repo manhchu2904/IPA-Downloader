@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+enum AppTab: Hashable {
+    case search
+    case downloads
+    case accounts
+}
+
 @main
 struct IPADownloaderApp: App {
     @StateObject private var service = IPAToolService()
@@ -28,24 +34,49 @@ struct IPADownloaderApp: App {
 
 struct ContentView: View {
     @EnvironmentObject private var service: IPAToolService
+    @State private var selectedTab: AppTab = .search
+
+    private var activeDownloadCount: Int {
+        service.activeDownloads.filter { !$0.isCompleted && $0.errorMessage == nil }.count
+    }
 
     var body: some View {
-        TabView {
-            SearchView()
-                .tabItem {
-                    Label("Tìm kiếm", systemImage: "magnifyingglass")
+        TabView(selection: $selectedTab) {
+            SearchView(
+                onOpenAccounts: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = .accounts
+                    }
+                },
+                onOpenDownloads: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = .downloads
+                    }
                 }
+            )
+            .tabItem {
+                Label("Tìm kiếm", systemImage: "magnifyingglass")
+            }
+            .tag(AppTab.search)
 
-            DownloadsView()
-                .tabItem {
-                    Label("Tải xuống", systemImage: "arrow.down.circle")
+            DownloadsView(
+                onOpenSearch: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = .search
+                    }
                 }
-                .badge(service.activeDownloads.filter { !$0.isCompleted && $0.errorMessage == nil }.count)
+            )
+            .tabItem {
+                Label("Tải xuống", systemImage: "arrow.down.circle.fill")
+            }
+            .badge(activeDownloadCount)
+            .tag(AppTab.downloads)
 
             AccountsView()
                 .tabItem {
-                    Label("Tài khoản", systemImage: "person.crop.circle")
+                    Label("Tài khoản", systemImage: "person.crop.circle.fill")
                 }
+                .tag(AppTab.accounts)
         }
     }
 }

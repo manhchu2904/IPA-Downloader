@@ -217,7 +217,7 @@ func toAccountDTO(id string, acc appstore.Account) AccountDTO {
 func validateAppleIDInput(raw string) error {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || strings.ContainsAny(trimmed, " \t\r\n") {
-		return errors.New("Apple ID không hợp lệ (vui lòng nhập đúng định dạng email hoặc số điện thoại)")
+		return errors.New("Email hoặc số điện thoại không hợp lệ.")
 	}
 	if at := strings.IndexByte(trimmed, '@'); at > 0 {
 		local := trimmed[:at]
@@ -226,7 +226,7 @@ func validateAppleIDInput(raw string) error {
 		if len(local) > 0 && dot > 0 && dot < len(domain)-1 && !strings.Contains(domain, "@") {
 			return nil
 		}
-		return errors.New("Email Apple ID không đúng định dạng (ví dụ: ten@icloud.com)")
+		return errors.New("Email hoặc số điện thoại không hợp lệ.")
 	}
 	// Phone-number Apple ID: must consist of digits (and optional '+', '-', '(', ')') with >= 7 digits
 	digits := 0
@@ -237,11 +237,11 @@ func validateAppleIDInput(raw string) error {
 		case r == '+' && i == 0:
 		case r == '-' || r == '(' || r == ')':
 		default:
-			return errors.New("Apple ID phải là địa chỉ email hợp lệ (có @) hoặc số điện thoại")
+			return errors.New("Email hoặc số điện thoại không hợp lệ.")
 		}
 	}
 	if digits < 7 {
-		return errors.New("Apple ID phải là địa chỉ email hợp lệ hoặc số điện thoại đủ chữ số")
+		return errors.New("Email hoặc số điện thoại không hợp lệ.")
 	}
 	return nil
 }

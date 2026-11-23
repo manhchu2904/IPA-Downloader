@@ -3,6 +3,9 @@ import UIKit
 
 struct DownloadsView: View {
     @EnvironmentObject private var service: IPAToolService
+
+    var onOpenSearch: () -> Void = {}
+
     @State private var shareURL: URL?
     @State private var selectedAccountFilter: String = "ALL"
     @State private var searchText: String = ""
@@ -47,139 +50,49 @@ struct DownloadsView: View {
 
     var body: some View {
         NavigationView {
-            List {
-                if !service.downloadedFiles.isEmpty {
-                    Section {
-                        HStack {
-                            Label("\(filteredFiles.count) file .ipa", systemImage: "archivebox.fill")
-                                .font(.subheadline.weight(.medium))
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: totalStorageBytes, countStyle: .file))
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.accentColor)
+            ZStack {
+                AppTheme.groupedBackground
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        if !service.activeDownloads.isEmpty {
+                            activeDownloadsSection
                         }
 
-                        if availableAccountGroups.count > 1 || selectedAccountFilter != "ALL" {
-                            HStack {
-                                Text("Lọc theo Apple ID")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer(minLength: 12)
-                                Menu {
-                                    Button {
-                                        selectedAccountFilter = "ALL"
-                                    } label: {
-                                        HStack {
-                                            Text("Tất cả Apple ID (\(service.downloadedFiles.count))")
-                                            if selectedAccountFilter == "ALL" {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                    ForEach(availableAccountGroups, id: \.self) { email in
-                                        let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
-                                        Button {
-                                            selectedAccountFilter = email
-                                        } label: {
-                                            HStack {
-                                                Text("\(email) (\(count))")
-                                                if selectedAccountFilter == email {
-                                                    Image(systemName: "checkmark")
-                                                }
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text(selectedAccountFilter == "ALL" ? "Tất cả (\(service.downloadedFiles.count))" : selectedAccountFilter)
-                                            .font(.subheadline)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.85)
-                                        Image(systemName: "chevron.up.chevron.down")
-                                            .font(.caption)
-                                    }
-                                }
+                        if !service.downloadedFiles.isEmpty {
+                            storageSummaryCard
+                        }
+
+                        if service.downloadedFiles.isEmpty && service.activeDownloads.isEmpty {
+                            ModernEmptyState(
+                                icon: "arrow.down.doc.fill",
+                                title: "Chưa có file .ipa nào",
+                                subtitle: "Các gói .ipa tải từ App Store sẽ tự động phân loại theo từng tài khoản Apple ID để cài đặt trực tiếp hoặc chia sẻ.",
+                                gradient: AppTheme.primaryGradient,
+                                actionTitle: "Tìm ứng dụng ngay",
+                                actionIcon: "magnifyingglass",
+                                action: onOpenSearch
+                            )
+                            .padding(.top, 16)
+                        } else if !service.downloadedFiles.isEmpty && groupedAccountKeys.isEmpty {
+                            ModernEmptyState(
+                                icon: "doc.text.magnifyingglass",
+                                title: "Không tìm thấy gói .ipa",
+                                subtitle: "Không có file nào khớp với từ khóa hoặc bộ lọc hiện tại.",
+                                gradient: AppTheme.slateGradient,
+                                compact: true
+                            )
+                            .padding(.top, 12)
+                        } else {
+                            ForEach(groupedAccountKeys, id: \.self) { accountEmail in
+                                accountFilesSection(accountEmail: accountEmail)
                             }
                         }
                     }
-                }
-
-                if !service.activeDownloads.isEmpty {
-                    Section {
-                        ForEach(service.activeDownloads) { item in
-                            activeDownloadRow(item)
-                        }
-                    } header: {
-                        HStack {
-                            Text("Tiến trình tải (\(service.activeDownloads.count))")
-                            Spacer()
-                            if service.activeDownloads.contains(where: { $0.isCompleted || $0.errorMessage != nil }) {
-                                Button("Xóa mục đã xong") {
-                                    service.clearCompletedDownloads()
-                                }
-                                .font(.caption)
-                            }
-                        }
-                    } footer: {
-                        if service.hasActiveDownloads {
-                            Label("Chế độ giữ tải ngầm đang hoạt động — bạn có thể chuyển sang ứng dụng khác hoặc khóa màn hình.", systemImage: "bolt.shield.fill")
-                                .font(.caption2)
-                                .foregroundColor(.green)
-                        }
-                    }
-                }
-
-                if service.downloadedFiles.isEmpty {
-                    Section {
-                        VStack(spacing: 10) {
-                            Image(systemName: "arrow.down.doc")
-                                .font(.system(size: 36))
-                                .foregroundColor(.secondary)
-                            Text("Chưa có file .ipa nào được tải về")
-                                .font(.headline)
-                            Text("Các file .ipa khi tải xong sẽ được tự động phân loại vào thư mục riêng theo từng Apple ID.")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                    } header: {
-                        Text("File .ipa đã lưu (Files > On My iPhone > IPA Downloader > IPAs)")
-                    }
-                } else if groupedAccountKeys.isEmpty {
-                    Section {
-                        Text("Không tìm thấy file .ipa nào khớp bộ lọc.")
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    ForEach(groupedAccountKeys, id: \.self) { accountEmail in
-                        let groupFiles = filteredFiles.filter { $0.accountEmail == accountEmail }
-                        let groupBytes = groupFiles.reduce(Int64(0)) { $0 + $1.size }
-
-                        Section {
-                            ForEach(groupFiles) { file in
-                                downloadedFileRow(file)
-                            }
-                        } header: {
-                            HStack {
-                                Image(systemName: "person.crop.circle.fill")
-                                    .foregroundColor(.accentColor)
-                                Text(accountEmail)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .textCase(nil)
-                                Spacer()
-                                Text("\(groupFiles.count) file • \(ByteCountFormatter.string(fromByteCount: groupBytes, countStyle: .file))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .textCase(nil)
-                            }
-                        } footer: {
-                            Text("Thư mục: Files > On My iPhone > IPA Downloader > IPAs > \(accountEmail)")
-                        }
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 28)
                 }
             }
             .navigationTitle("Tải xuống")
@@ -276,84 +189,260 @@ struct DownloadsView: View {
         .navigationViewStyle(.stack)
     }
 
-    @ViewBuilder
-    private func activeDownloadRow(_ item: ActiveDownload) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(item.appName)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Text("v\(item.versionLabel)")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(spacing: 4) {
-                Image(systemName: "person.fill")
-                    .font(.caption2)
-                    .foregroundColor(.accentColor)
-                Text("ID: \(item.accountEmail)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-
-            if let err = item.errorMessage {
-                Text(err)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                Button("Xóa khỏi danh sách") {
-                    service.removeFinishedDownloadEntry(id: item.id)
-                }
-                .font(.caption)
-            } else if item.isCompleted {
-                HStack {
-                    Label("Hoàn tất (đã lưu vào thư mục \(item.accountEmail))", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                    Spacer()
-                    Button("Ẩn") {
-                        service.removeFinishedDownloadEntry(id: item.id)
-                    }
-                    .font(.caption)
-                }
-            } else {
-                ProgressView(value: min(max(item.percent, 0), 1))
-                HStack {
-                    Text(stageLabel(item.stage))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    if item.speedBytesPerSec > 0 && item.stage == "downloading" {
-                        Text("• \(ByteCountFormatter.string(fromByteCount: Int64(item.speedBytesPerSec), countStyle: .file))/s")
-                            .font(.caption2)
-                            .foregroundColor(.accentColor)
-                    }
-                    Spacer()
-                    if item.totalBytes > 0 {
-                        Text("\(ByteCountFormatter.string(fromByteCount: item.downloadedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))")
-                            .font(.caption2)
+    private var storageSummaryCard: some View {
+        ModernCard(padding: 15, cornerRadius: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    ModernIconBadge(systemName: "archivebox.fill", gradient: AppTheme.primaryGradient, size: 38, cornerRadius: 11)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Kho gói .ipa đã lưu")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("\(filteredFiles.count) gói • \(availableAccountGroups.count) tài khoản")
+                            .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    Button("Hủy", role: .destructive) {
-                        service.cancelDownload(id: item.id)
+                    Spacer()
+                    Text(ByteCountFormatter.string(fromByteCount: totalStorageBytes, countStyle: .file))
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(Color.accentColor.opacity(0.12))
+                        .foregroundColor(.accentColor)
+                        .clipShape(Capsule())
+                }
+
+                if availableAccountGroups.count > 1 || selectedAccountFilter != "ALL" {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            filterChip(
+                                title: "Tất cả (\(service.downloadedFiles.count))",
+                                isSelected: selectedAccountFilter == "ALL"
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    selectedAccountFilter = "ALL"
+                                }
+                            }
+
+                            ForEach(availableAccountGroups, id: \.self) { email in
+                                let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
+                                filterChip(
+                                    title: "\(email) (\(count))",
+                                    isSelected: selectedAccountFilter == email
+                                ) {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        selectedAccountFilter = email
+                                    }
+                                }
+                            }
+                        }
                     }
-                    .font(.caption)
-                    .buttonStyle(.borderless)
                 }
             }
         }
-        .padding(.vertical, 4)
+    }
+
+    private func filterChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(isSelected ? Color.accentColor : AppTheme.subtleSurface)
+                .foregroundColor(isSelected ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var activeDownloadsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                ModernSectionHeader(title: "Tiến trình tải (\(service.activeDownloads.count))")
+                if service.activeDownloads.contains(where: { $0.isCompleted || $0.errorMessage != nil }) {
+                    Button("Xóa mục xong") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            service.clearCompletedDownloads()
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
+
+            if service.hasActiveDownloads {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.shield.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                    Text("Giữ tải ngầm đang bật — có thể thoát app hoặc khóa màn hình.")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            ForEach(service.activeDownloads) { item in
+                activeDownloadCard(item)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activeDownloadCard(_ item: ActiveDownload) -> some View {
+        ModernCard(padding: 14, cornerRadius: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    ModernIconBadge(
+                        systemName: item.errorMessage != nil
+                            ? "exclamationmark.triangle.fill"
+                            : (item.isCompleted ? "checkmark.circle.fill" : "arrow.down.circle.fill"),
+                        gradient: item.errorMessage != nil
+                            ? AppTheme.coralGradient
+                            : (item.isCompleted ? AppTheme.emeraldGradient : AppTheme.primaryGradient),
+                        size: 34,
+                        cornerRadius: 10
+                    )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(item.appName)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                            Text("v\(item.versionLabel)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(item.accountEmail)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if item.errorMessage == nil && !item.isCompleted {
+                        Button("Hủy", role: .destructive) {
+                            service.cancelDownload(id: item.id)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.red.opacity(0.12))
+                        .foregroundColor(.red)
+                        .clipShape(Capsule())
+                    } else {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                service.removeFinishedDownloadEntry(id: item.id)
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 26, height: 26)
+                                .background(AppTheme.subtleSurface)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if let err = item.errorMessage {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                } else if item.isCompleted {
+                    ModernStatusPill(
+                        text: "Hoàn tất • Đã lưu vào \(item.accountEmail)",
+                        color: .green,
+                        icon: "checkmark"
+                    )
+                } else {
+                    VStack(spacing: 6) {
+                        ProgressView(value: min(max(item.percent, 0), 1))
+                            .tint(.accentColor)
+
+                        HStack {
+                            Text(stageLabel(item.stage))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if item.speedBytesPerSec > 0 && item.stage == "downloading" {
+                                Text("• \(ByteCountFormatter.string(fromByteCount: Int64(item.speedBytesPerSec), countStyle: .file))/s")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.accentColor)
+                            }
+                            Spacer()
+                            if item.totalBytes > 0 {
+                                Text("\(ByteCountFormatter.string(fromByteCount: item.downloadedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func accountFilesSection(accountEmail: String) -> some View {
+        let groupFiles = filteredFiles.filter { $0.accountEmail == accountEmail }
+        let groupBytes = groupFiles.reduce(Int64(0)) { $0 + $1.size }
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.accentColor)
+                Text(accountEmail)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(groupFiles.count) file • \(ByteCountFormatter.string(fromByteCount: groupBytes, countStyle: .file))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 4)
+
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    ForEach(groupFiles) { file in
+                        downloadedFileRow(file)
+                        if file.id != groupFiles.last?.id {
+                            Divider().padding(.leading, 56)
+                        }
+                    }
+                }
+            }
+
+            Text("Files > On My iPhone > IPA Downloader > IPAs > \(accountEmail)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+        }
     }
 
     @ViewBuilder
     private func downloadedFileRow(_ file: DownloadedIPA) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 12) {
+            ModernIconBadge(systemName: "shippingbox.fill", gradient: AppTheme.purpleGradient, size: 36, cornerRadius: 10)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(file.name)
                     .font(.subheadline)
-                    .fontWeight(.medium)
+                    .fontWeight(.semibold)
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     Text(file.formattedSize)
@@ -363,29 +452,29 @@ struct DownloadsView: View {
                     Text("• \(file.createdAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
-                Text("Apple ID: \(file.accountEmail)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
             }
-            Spacer()
+
+            Spacer(minLength: 6)
 
             Button {
                 fileToInstall = file
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.down.app.fill")
+                        .font(.caption)
                     Text("Cài")
                         .font(.caption)
-                        .fontWeight(.semibold)
+                        .fontWeight(.bold)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.15))
-                .foregroundColor(.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(AppTheme.primaryGradient)
+                .foregroundColor(.white)
                 .clipShape(Capsule())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
 
             Menu {
                 Button {
@@ -421,12 +510,18 @@ struct DownloadsView: View {
                     Label("Xóa file", systemImage: "trash")
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
+                Image(systemName: "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(AppTheme.subtleSurface)
+                    .clipShape(Circle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
         .contextMenu {
             Button {
                 fileToInstall = file
@@ -454,20 +549,6 @@ struct DownloadsView: View {
             } label: {
                 Label("Xóa file", systemImage: "trash")
             }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                service.deleteDownloadedFile(file)
-            } label: {
-                Label("Xóa", systemImage: "trash")
-            }
-            Button {
-                newFileName = file.name.replacingOccurrences(of: ".ipa", with: "")
-                fileToRename = file
-            } label: {
-                Label("Đổi tên", systemImage: "pencil")
-            }
-            .tint(.orange)
         }
     }
 
@@ -519,154 +600,26 @@ private struct IPAInstallerSheet: View {
                 .font(.subheadline)
                 .fontWeight(bold ? .semibold : .regular)
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .minimumScaleFactor(0.82)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     var body: some View {
         NavigationView {
-            List {
-                Section("Thông tin gói .ipa") {
-                    if let session {
-                        infoRow(title: "Ứng dụng", value: session.appName, bold: true)
-                        infoRow(title: "Bundle ID", value: session.bundleId)
-                        infoRow(title: "Phiên bản", value: "v\(session.version)")
-                    } else {
-                        infoRow(title: "Tên file", value: file.name)
+            ZStack {
+                AppTheme.groupedBackground
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 16) {
+                        packageInfoCard
+                        statusAndActionsSection
                     }
-                    infoRow(title: "Dung lượng", value: file.formattedSize)
-                    infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
-                    infoRow(
-                        title: "Chế độ OTA",
-                        value: useLocalHTTPSMode
-                            ? "HTTPS Cục bộ (\(session?.httpsHost ?? "Offline"))"
-                            : "Trực tiếp"
-                    )
-                }
-
-                Section {
-                    if isStarting {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Đang khởi tạo máy chủ cài đặt cục bộ...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    } else if let errorMessage {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .font(.subheadline)
-                    } else if let session {
-                        if useLocalHTTPSMode && service.localCATrustState != .trusted {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
-                                    Text(service.localCATrustState.title)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.orange)
-                                }
-                                Text("Hãy cài hồ sơ chứng chỉ CA cục bộ và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-
-                                Button {
-                                    if let url = URL(string: session.caCertUrl) {
-                                        UIApplication.shared.open(url)
-                                    }
-                                } label: {
-                                    Label("Tải chứng chỉ CA cục bộ qua Safari", systemImage: "arrow.down.doc.fill")
-                                        .font(.subheadline)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-
-                        if useLocalHTTPSMode, let tlsDiag = service.installTLSDiagnostic {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Label("Chẩn đoán TLS cục bộ", systemImage: "exclamationmark.shield.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.red)
-                                Text(tlsDiag)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Button {
-                                    useLocalHTTPSMode = false
-                                    service.installTLSDiagnostic = nil
-                                    triggerITMSInstall(session: session)
-                                } label: {
-                                    Label("Chuyển sang Chế độ Trực tiếp & Cài ngay", systemImage: "bolt.fill")
-                                        .font(.caption.weight(.semibold))
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 10) {
-                                Image(systemName: statusIcon)
-                                    .font(.title2)
-                                    .foregroundColor(statusColor)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(statusTitle)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                    Text(statusSubtitle)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            if service.installStage == "sending_payload" || service.installStage == "completed" {
-                                ProgressView(value: min(max(service.installPercent, 0), 1))
-                                HStack {
-                                    Text("\(Int(min(max(service.installPercent, 0), 1) * 100))%")
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                    Spacer()
-                                    Text("\(ByteCountFormatter.string(fromByteCount: service.installSentBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: max(service.installTotalBytes, session.fileSize), countStyle: .file))")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-
-                        Button {
-                            triggerITMSInstall(session: session)
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Image(systemName: "arrow.down.app.fill")
-                                Text("Hiện hộp thoại Cài đặt iOS")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Spacer()
-                            }
-                        }
-
-                        Button {
-                            let urlStr: String
-                            if useLocalHTTPSMode {
-                                let host = session.httpsHost ?? "app.localtest.me"
-                                urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
-                            } else {
-                                urlStr = session.safariInstallUrl
-                            }
-                            DebugLogger.log("OTA opening Safari URL: \(urlStr)")
-                            if let url = URL(string: urlStr) {
-                                UIApplication.shared.open(url)
-                            }
-                        } label: {
-                            Label("Mở trang cài đặt qua trình duyệt Safari", systemImage: "safari")
-                                .font(.subheadline)
-                        }
-                    }
-                } header: {
-                    Text("Trạng thái cài đặt OTA")
-                } footer: {
-                    Text("Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong). Có thể đổi phương thức cài đặt trong tab Tài khoản.")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
                 }
             }
             .navigationTitle("Cài đặt vào máy")
@@ -693,6 +646,195 @@ private struct IPAInstallerSheet: View {
         }
     }
 
+    private var packageInfoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(title: "Thông tin gói .ipa")
+
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    if let session {
+                        infoRow(title: "Ứng dụng", value: session.appName, bold: true)
+                        Divider().padding(.leading, 14)
+                        infoRow(title: "Bundle ID", value: session.bundleId)
+                        Divider().padding(.leading, 14)
+                        infoRow(title: "Phiên bản", value: "v\(session.version)")
+                        Divider().padding(.leading, 14)
+                    } else {
+                        infoRow(title: "Tên file", value: file.name, bold: true)
+                        Divider().padding(.leading, 14)
+                    }
+                    infoRow(title: "Dung lượng", value: file.formattedSize)
+                    Divider().padding(.leading, 14)
+                    infoRow(title: "Apple ID bản quyền", value: file.accountEmail)
+                    Divider().padding(.leading, 14)
+                    infoRow(
+                        title: "Chế độ OTA",
+                        value: useLocalHTTPSMode
+                            ? "HTTPS Cục bộ (\(session?.httpsHost ?? "Offline"))"
+                            : "Trực tiếp"
+                    )
+                }
+            }
+        }
+    }
+
+    private var statusAndActionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ModernSectionHeader(title: "Trạng thái cài đặt OTA")
+
+            if isStarting {
+                ModernCard(padding: 18, cornerRadius: 16) {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Đang khởi tạo máy chủ cài đặt cục bộ...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+            } else if let errorMessage {
+                ModernCard(padding: 16, cornerRadius: 16) {
+                    HStack(spacing: 10) {
+                        ModernIconBadge(systemName: "exclamationmark.triangle.fill", gradient: AppTheme.coralGradient, size: 32, cornerRadius: 9)
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.subheadline)
+                        Spacer()
+                    }
+                }
+            } else if let session {
+                if useLocalHTTPSMode && service.localCATrustState != .trusted {
+                    ModernCard(padding: 14, cornerRadius: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 10) {
+                                ModernIconBadge(systemName: "exclamationmark.shield.fill", gradient: AppTheme.amberGradient, size: 32, cornerRadius: 9)
+                                Text(service.localCATrustState.title)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.orange)
+                            }
+                            Text("Hãy cài hồ sơ chứng chỉ CA cục bộ và bật Tin cậy trong Cài đặt > Cài đặt chung > Giới thiệu > Cài đặt tin cậy chứng chỉ để dùng chế độ HTTPS Cục bộ.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Button {
+                                if let url = URL(string: session.caCertUrl) {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.down.doc.fill")
+                                    Text("Tải chứng chỉ CA cục bộ qua Safari")
+                                }
+                            }
+                            .buttonStyle(ModernSecondaryButtonStyle())
+                        }
+                    }
+                }
+
+                if useLocalHTTPSMode, let tlsDiag = service.installTLSDiagnostic {
+                    ModernCard(padding: 14, cornerRadius: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.shield.fill")
+                                    .foregroundColor(.red)
+                                Text("Chẩn đoán TLS cục bộ")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.red)
+                            }
+                            Text(tlsDiag)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button {
+                                useLocalHTTPSMode = false
+                                service.installTLSDiagnostic = nil
+                                triggerITMSInstall(session: session)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "bolt.fill")
+                                    Text("Chuyển sang Chế độ Trực tiếp & Cài ngay")
+                                }
+                            }
+                            .buttonStyle(ModernPrimaryButtonStyle())
+                        }
+                    }
+                }
+
+                ModernCard(padding: 16, cornerRadius: 18) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 12) {
+                            ModernIconBadge(systemName: statusIcon, gradient: statusGradient, size: 42, cornerRadius: 12)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(statusTitle)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text(statusSubtitle)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+
+                        if service.installStage == "sending_payload" || service.installStage == "completed" {
+                            VStack(spacing: 6) {
+                                ProgressView(value: min(max(service.installPercent, 0), 1))
+                                    .tint(service.installStage == "completed" ? .green : .accentColor)
+                                HStack {
+                                    Text("\(Int(min(max(service.installPercent, 0), 1) * 100))%")
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(service.installStage == "completed" ? .green : .accentColor)
+                                    Spacer()
+                                    Text("\(ByteCountFormatter.string(fromByteCount: service.installSentBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: max(service.installTotalBytes, session.fileSize), countStyle: .file))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        VStack(spacing: 10) {
+                            Button {
+                                triggerITMSInstall(session: session)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "arrow.down.app.fill")
+                                    Text("Hiện hộp thoại Cài đặt iOS")
+                                }
+                            }
+                            .buttonStyle(ModernPrimaryButtonStyle())
+
+                            Button {
+                                let urlStr: String
+                                if useLocalHTTPSMode {
+                                    let host = session.httpsHost ?? "app.localtest.me"
+                                    urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
+                                } else {
+                                    urlStr = session.safariInstallUrl
+                                }
+                                DebugLogger.log("OTA opening Safari URL: \(urlStr)")
+                                if let url = URL(string: urlStr) {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "safari.fill")
+                                    Text("Mở trang cài đặt qua trình duyệt Safari")
+                                }
+                            }
+                            .buttonStyle(ModernSecondaryButtonStyle())
+                        }
+                    }
+                }
+            }
+
+            Text("Sau khi bấm 'Cài đặt' trên hộp thoại hệ thống iOS, bạn có thể ra màn hình chính để xem ứng dụng được cài đặt (giữ IPA Downloader chạy ngầm, không vuốt tắt app cho đến khi cài xong). Có thể đổi phương thức cài đặt trong tab Tài khoản.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+        }
+    }
+
     private var statusIcon: String {
         switch service.installStage {
         case "ready": return "iphone.and.arrow.forward"
@@ -703,11 +845,11 @@ private struct IPAInstallerSheet: View {
         }
     }
 
-    private var statusColor: Color {
+    private var statusGradient: LinearGradient {
         switch service.installStage {
-        case "completed": return .green
-        case "sending_payload", "sending_manifest": return .accentColor
-        default: return .orange
+        case "completed": return AppTheme.emeraldGradient
+        case "sending_payload", "sending_manifest": return AppTheme.primaryGradient
+        default: return AppTheme.amberGradient
         }
     }
 

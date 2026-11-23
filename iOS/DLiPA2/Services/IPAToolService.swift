@@ -26,6 +26,8 @@ final class IPAToolService: ObservableObject {
     private let encoder = JSONEncoder()
     private var versionMetadataCache: [String: VersionMetadata] = [:]
     private var versionCacheFileURL: URL?
+    private var isRuntimePrepared = false
+    private var prepareTask: Task<Void, Error>?
 
     var selectedAccount: AppleAccount? {
         if let id = selectedAccountId, let match = accounts.first(where: { $0.id == id }) {
@@ -81,17 +83,37 @@ final class IPAToolService: ObservableObject {
         }
     }
 
-    private func prepareRuntimeIfNeeded() async {
-        guard let client else { return }
-        DebugLogger.log("prepare() background start")
-        do {
-            try await runBlocking {
+    private func ensureRuntimePrepared() async throws {
+        if isRuntimePrepared { return }
+        guard let client else {
+            throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
+        }
+        if let existing = prepareTask {
+            try await existing.value
+            return
+        }
+        let task = Task<Void, Error> { [weak self] in
+            guard let self else { return }
+            DebugLogger.log("prepare() start")
+            try await self.runBlocking {
                 try client.prepare()
             }
-            DebugLogger.log("prepare() background done")
-        } catch {
-            DebugLogger.log("prepare() background error: \(error.localizedDescription)")
+            self.isRuntimePrepared = true
+            DebugLogger.log("prepare() done")
         }
+        prepareTask = task
+        do {
+            try await task.value
+            prepareTask = nil
+        } catch {
+            prepareTask = nil
+            DebugLogger.log("prepare() error: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private func prepareRuntimeIfNeeded() async {
+        try? await ensureRuntimePrepared()
     }
 
     // MARK: - Accounts
@@ -119,11 +141,7 @@ final class IPAToolService: ObservableObject {
         JITHelper.prepareStartupJIT26PoolIfNeeded()
         DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) poolReady=\(JITHelper.isJITPoolReady()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
         do {
-            DebugLogger.log("login() prepare assets start")
-            try await runBlocking {
-                try client.prepare()
-            }
-            DebugLogger.log("login() prepare assets done")
+            try await ensureRuntimePrepared()
 
             let json = try await runBridge { errPtr in
                 client.login(email, password: password, authCode: authCode, error: errPtr)
@@ -139,6 +157,10 @@ final class IPAToolService: ObservableObject {
             return response
         } catch {
             DebugLogger.log("login() error: \(error.localizedDescription)")
+            let lower = error.localizedDescription.lowercased()
+            if lower.contains("badlogin") || lower.contains("invalid credentials") || lower.contains("incorrect") || lower.contains("wrong password") || lower.contains("password is incorrect") {
+                throw NSError(domain: "IPADownloader", code: -3, userInfo: [NSLocalizedDescriptionKey: "Hãy kiểm tra lại email hoặc mật khẩu và thử lại."])
+            }
             throw error
         }
     }

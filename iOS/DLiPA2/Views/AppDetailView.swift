@@ -6,6 +6,7 @@ struct AppDetailView: View {
 
     let app: AppItem
     let platform: String
+    var onOpenDownloads: () -> Void = {}
 
     @State private var versionHistory: VersionHistory?
     @State private var resolvedMetadata: [String: VersionMetadata] = [:]
@@ -15,7 +16,9 @@ struct AppDetailView: View {
     @State private var showManualVersionAlert = false
     @State private var manualVersionIdInput: String = ""
     @State private var errorMessage: String?
-    @State private var downloadStartedBanner = false
+    @State private var toastMessage: String?
+    @State private var toastIsDownload = false
+    @State private var toastDismissTask: Task<Void, Never>?
 
     private var activeAccountEmail: String {
         service.selectedAccount?.email ?? "Chưa chọn tài khoản"
@@ -41,171 +44,47 @@ struct AppDetailView: View {
     }
 
     var body: some View {
-        List {
-            Section("Thông tin ứng dụng") {
-                HStack(spacing: 14) {
-                    AppIconView(urlString: app.artworkUrl, size: 64)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(app.name)
-                            .font(.headline)
-                        if let seller = app.sellerName, !seller.isEmpty {
-                            Text(seller)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        Text("v\(app.version) • \(app.formattedPrice)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
+        ZStack(alignment: .bottom) {
+            AppTheme.groupedBackground
+                .ignoresSafeArea()
 
-                LabeledContentRow(title: "Bundle ID", value: app.bundleId)
-                LabeledContentRow(title: "App ID", value: String(app.id))
-                LabeledContentRow(title: "Phiên bản mới nhất", value: "v\(app.version)")
-
-                if service.accounts.count > 1 {
-                    HStack {
-                        Text("Apple ID tải về")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer(minLength: 12)
-                        Menu {
-                            ForEach(service.accounts) { account in
-                                Button {
-                                    service.selectedAccountId = account.id
-                                } label: {
-                                    HStack {
-                                        Text("\(account.email) (\(account.storefrontCountryCode))")
-                                        if account.id == service.selectedAccount?.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(activeAccountEmail)
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                } else {
-                    LabeledContentRow(title: "Apple ID tải về", value: activeAccountEmail)
+            ScrollView {
+                VStack(spacing: 16) {
+                    heroCard
+                    metadataCard
+                    versionHistorySection
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 84)
             }
 
-            Section {
-                Button {
-                    service.startDownload(app: app, externalVersionId: "", versionLabel: app.version, platform: platform)
-                    downloadStartedBanner = true
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.down.circle.fill")
-                        Text("Tải phiên bản mới nhất (v\(app.version))")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                }
-
-                Button {
-                    manualVersionIdInput = ""
-                    showManualVersionAlert = true
-                } label: {
-                    HStack {
-                        Image(systemName: "number.circle")
-                        Text("Nhập Version ID thủ công để tải...")
-                            .font(.subheadline)
-                    }
-                }
-            } footer: {
-                Text("File .ipa tải xong sẽ được lưu riêng vào thư mục của Apple ID: \(activeAccountEmail)")
-            }
-
-            Section {
-                if isLoadingVersions {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Đang tải danh sách lịch sử phiên bản...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                } else if let history = versionHistory {
-                    let orderedIds = Array(history.versionIds.reversed())
-                    if orderedIds.isEmpty {
-                        Text("Không có dữ liệu phiên bản cũ.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    } else {
-                        if orderedIds.count > 5 {
-                            HStack {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
-                                    .foregroundColor(.secondary)
-                                TextField("Lọc phiên bản (vd: 8.5, 2025, hoặc ID)...", text: $versionFilterText)
-                                    .font(.subheadline)
-                                    .autocapitalization(.none)
-                                    .disableAutocorrection(true)
-                                if !versionFilterText.isEmpty {
-                                    Button {
-                                        versionFilterText = ""
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .buttonStyle(.borderless)
-                                }
-                            }
+            if let toastMessage {
+                ModernFloatingToast(
+                    icon: toastIsDownload ? "arrow.down.circle.fill" : "checkmark.circle.fill",
+                    title: toastMessage,
+                    subtitle: toastIsDownload ? "Lưu vào thư mục \(activeAccountEmail)" : nil,
+                    actionTitle: toastIsDownload ? "Xem" : nil,
+                    action: toastIsDownload ? {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            self.toastMessage = nil
                         }
-
-                        let visibleIds = filteredVersionIDs(from: orderedIds)
-                        if visibleIds.isEmpty {
-                            Text("Không có phiên bản nào khớp với \"\(versionFilterText)\".")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(visibleIds, id: \.self) { vid in
-                                versionRow(vid: vid, latestId: history.latestVersionId)
-                            }
-                        }
-                    }
-                } else {
-                    Button {
-                        loadVersions()
-                    } label: {
-                        Label("Tải lịch sử phiên bản", systemImage: "clock.arrow.circlepath")
-                            .font(.subheadline)
-                    }
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .font(.footnote)
-                }
-            } header: {
-                HStack {
-                    Text("Lịch sử phiên bản")
-                    if let history = versionHistory, !history.versionIds.isEmpty {
-                        Spacer()
-                        Text("\(history.versionIds.count) bản")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            } footer: {
-                Text("Số phiên bản (vd: v1.2.3) được ánh xạ từ danh mục phiên bản công khai mà không gửi nhiều truy vấn lên Apple. Nhấn giữ vào một phiên bản để sao chép nhanh ID hoặc số phiên bản.")
+                        onOpenDownloads()
+                    } : nil
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: toastMessage != nil)
         .navigationTitle(app.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if versionHistory == nil && !isLoadingVersions {
                 loadVersions()
             }
+        }
+        .onDisappear {
+            toastDismissTask?.cancel()
         }
         .alert("Nhập External Version ID", isPresented: $showManualVersionAlert) {
             TextField("Ví dụ: 871234567", text: $manualVersionIdInput)
@@ -214,17 +93,272 @@ struct AppDetailView: View {
                 let cleaned = manualVersionIdInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !cleaned.isEmpty else { return }
                 let label = resolvedMetadata[cleaned]?.displayVersion ?? cleaned
-                service.startDownload(app: app, externalVersionId: cleaned, versionLabel: label, platform: platform)
-                downloadStartedBanner = true
+                triggerDownload(externalVersionId: cleaned, versionLabel: label)
             }
             Button("Hủy", role: .cancel) {}
         } message: {
             Text("Nhập mã số External Version ID của phiên bản bạn muốn tải cho \(app.name).")
         }
-        .alert("Đã thêm vào hàng đợi tải", isPresented: $downloadStartedBanner) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("File .ipa sẽ được lưu trong thư mục của tài khoản \(activeAccountEmail). Chuyển sang tab Tải xuống để theo dõi tiến trình.")
+    }
+
+    private var heroCard: some View {
+        ModernCard(padding: 18, cornerRadius: 20) {
+            VStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 15) {
+                    AppIconView(urlString: app.artworkUrl, size: 80)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(app.name)
+                            .font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let seller = app.sellerName, !seller.isEmpty {
+                            Text(seller)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+
+                        HStack(spacing: 6) {
+                            ModernStatusPill(text: "v\(app.version)", color: .accentColor, icon: "tag.fill")
+                            ModernStatusPill(
+                                text: app.price <= 0 ? "Miễn phí" : app.formattedPrice,
+                                color: app.price <= 0 ? .green : .orange,
+                                icon: app.price <= 0 ? "checkmark" : "cart.fill"
+                            )
+                            ModernStatusPill(
+                                text: platform == "ipad" ? "iPad" : "iPhone",
+                                color: .secondary,
+                                icon: platform == "ipad" ? "ipad" : "iphone"
+                            )
+                        }
+                        .padding(.top, 2)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                VStack(spacing: 10) {
+                    Button {
+                        triggerDownload(externalVersionId: "", versionLabel: app.version)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.circle.fill")
+                            Text("Tải phiên bản mới nhất (v\(app.version))")
+                        }
+                    }
+                    .buttonStyle(ModernPrimaryButtonStyle())
+
+                    Button {
+                        manualVersionIdInput = ""
+                        showManualVersionAlert = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "number.circle.fill")
+                            Text("Nhập Version ID thủ công")
+                        }
+                    }
+                    .buttonStyle(ModernSecondaryButtonStyle())
+                }
+            }
+        }
+    }
+
+    private var metadataCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ModernSectionHeader(title: "Thông tin gói ứng dụng")
+
+            ModernCard(padding: 0, cornerRadius: 16) {
+                VStack(spacing: 0) {
+                    copyableInfoRow(icon: "shippingbox.fill", gradient: AppTheme.primaryGradient, title: "Bundle ID", value: app.bundleId)
+                    Divider().padding(.leading, 54)
+                    copyableInfoRow(icon: "number", gradient: AppTheme.purpleGradient, title: "App ID", value: String(app.id))
+                    Divider().padding(.leading, 54)
+
+                    HStack(spacing: 12) {
+                        ModernIconBadge(systemName: "person.crop.circle.fill", gradient: AppTheme.emeraldGradient, size: 30, cornerRadius: 8)
+                        Text("Apple ID tải về")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer(minLength: 10)
+
+                        if service.accounts.count > 1 {
+                            Menu {
+                                ForEach(service.accounts) { account in
+                                    Button {
+                                        service.selectedAccountId = account.id
+                                    } label: {
+                                        HStack {
+                                            Text("\(account.email) (\(account.storefrontCountryCode))")
+                                            if account.id == service.selectedAccount?.id {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(activeAccountEmail)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption)
+                                }
+                            }
+                        } else {
+                            Text(activeAccountEmail)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                }
+            }
+
+            Text("File .ipa tải xong sẽ được lưu riêng vào thư mục của Apple ID: \(activeAccountEmail)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+        }
+    }
+
+    private func copyableInfoRow(icon: String, gradient: LinearGradient, title: String, value: String) -> some View {
+        Button {
+            UIPasteboard.general.string = value
+            showToast(title: "Đã sao chép \(title)", isDownload: false)
+        } label: {
+            HStack(spacing: 12) {
+                ModernIconBadge(systemName: icon, gradient: gradient, size: 30, cornerRadius: 8)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 10)
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "doc.on.doc")
+                    .font(.caption)
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var versionHistorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ModernSectionHeader(
+                title: "Lịch sử phiên bản",
+                trailing: versionHistory.map { "\($0.versionIds.count) bản" }
+            )
+
+            if isLoadingVersions {
+                ModernCard(padding: 20, cornerRadius: 16) {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Đang tải danh sách lịch sử phiên bản...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+            } else if let history = versionHistory {
+                let orderedIds = Array(history.versionIds.reversed())
+                if orderedIds.isEmpty {
+                    ModernCard(padding: 16, cornerRadius: 16) {
+                        Text("Không có dữ liệu phiên bản cũ.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    if orderedIds.count > 5 {
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                                .foregroundColor(.secondary)
+                            TextField("Lọc phiên bản (vd: 8.5, 2025, hoặc ID)...", text: $versionFilterText)
+                                .font(.subheadline)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                            if !versionFilterText.isEmpty {
+                                Button {
+                                    versionFilterText = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(AppTheme.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 0.75)
+                        )
+                    }
+
+                    let visibleIds = filteredVersionIDs(from: orderedIds)
+                    if visibleIds.isEmpty {
+                        ModernCard(padding: 16, cornerRadius: 16) {
+                            Text("Không có phiên bản nào khớp với \"\(versionFilterText)\".")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else {
+                        ModernCard(padding: 0, cornerRadius: 16) {
+                            LazyVStack(spacing: 0) {
+                                ForEach(visibleIds, id: \.self) { vid in
+                                    versionRow(vid: vid, latestId: history.latestVersionId)
+                                    if vid != visibleIds.last {
+                                        Divider().padding(.leading, 16)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Button {
+                    loadVersions()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath")
+                        Text("Tải lịch sử phiên bản")
+                    }
+                }
+                .buttonStyle(ModernSecondaryButtonStyle())
+            }
+
+            if let errorMessage {
+                ModernCard(padding: 12, cornerRadius: 14) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.footnote)
+                        Spacer()
+                    }
+                }
+            }
+
+            Text("Số phiên bản (vd: v1.2.3) được ánh xạ từ danh mục công khai. Nhấn giữ vào một phiên bản để sao chép nhanh ID hoặc số phiên bản.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
         }
     }
 
@@ -235,11 +369,12 @@ struct AppDetailView: View {
         let displayVer = meta?.displayVersion ?? (isLatest ? app.version : nil)
 
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
                     if let displayVer, !displayVer.isEmpty {
                         Text("v\(displayVer)")
-                            .font(.headline)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
                     } else if loadingVersionId == vid {
                         Text("Đang lấy số v...")
                             .font(.subheadline)
@@ -251,20 +386,13 @@ struct AppDetailView: View {
                     }
 
                     if isLatest {
-                        Text("Mới nhất")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15))
-                            .foregroundColor(.accentColor)
-                            .clipShape(Capsule())
+                        ModernStatusPill(text: "Mới nhất", color: .accentColor, icon: "sparkles")
                     }
                 }
 
                 HStack(spacing: 6) {
                     Text("ID: \(vid)")
-                        .font(.caption2)
+                        .font(.system(.caption2, design: .monospaced))
                         .foregroundColor(.secondary)
                     if let dateStr = formattedDate(meta?.releaseDate) {
                         Text("• \(dateStr)")
@@ -274,7 +402,7 @@ struct AppDetailView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if displayVer == nil {
                 Button {
@@ -285,41 +413,76 @@ struct AppDetailView: View {
                             .scaleEffect(0.85)
                     } else {
                         Image(systemName: "info.circle")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(AppTheme.subtleSurface)
+                            .clipShape(Circle())
                     }
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
             }
 
             Button {
                 let label = displayVer ?? vid
-                service.startDownload(app: app, externalVersionId: vid, versionLabel: label, platform: platform)
-                downloadStartedBanner = true
+                triggerDownload(externalVersionId: vid, versionLabel: label)
             } label: {
-                Image(systemName: "arrow.down.circle")
-                    .font(.title3)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down")
+                        .font(.caption.weight(.bold))
+                    Text("Tải")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.accentColor.opacity(0.14))
+                .foregroundColor(.accentColor)
+                .clipShape(Capsule())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
         .contextMenu {
             Button {
                 let label = displayVer ?? vid
-                service.startDownload(app: app, externalVersionId: vid, versionLabel: label, platform: platform)
-                downloadStartedBanner = true
+                triggerDownload(externalVersionId: vid, versionLabel: label)
             } label: {
                 Label("Tải phiên bản này", systemImage: "arrow.down.circle")
             }
             Button {
                 UIPasteboard.general.string = vid
+                showToast(title: "Đã sao chép Version ID", isDownload: false)
             } label: {
                 Label("Sao chép Version ID (\(vid))", systemImage: "doc.on.doc")
             }
             if let displayVer, !displayVer.isEmpty {
                 Button {
                     UIPasteboard.general.string = "v\(displayVer) (\(vid))"
+                    showToast(title: "Đã sao chép v\(displayVer)", isDownload: false)
                 } label: {
                     Label("Sao chép v\(displayVer)", systemImage: "tag")
                 }
+            }
+        }
+    }
+
+    private func triggerDownload(externalVersionId: String, versionLabel: String) {
+        service.startDownload(app: app, externalVersionId: externalVersionId, versionLabel: versionLabel, platform: platform)
+        showToast(title: "Đang tải \(app.name) v\(versionLabel)", isDownload: true)
+    }
+
+    private func showToast(title: String, isDownload: Bool) {
+        toastDismissTask?.cancel()
+        toastIsDownload = isDownload
+        toastMessage = title
+        toastDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                toastMessage = nil
             }
         }
     }
@@ -397,26 +560,6 @@ struct AppDetailView: View {
             } catch {
                 errorMessage = error.localizedDescription
             }
-        }
-    }
-}
-
-private struct LabeledContentRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Spacer(minLength: 12)
-            Text(value)
-                .font(.subheadline)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .textSelection(.enabled)
         }
     }
 }
