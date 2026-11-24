@@ -119,18 +119,20 @@ struct AppDetailView: View {
                                 .lineLimit(2)
                         }
 
-                        HStack(spacing: 6) {
-                            ModernStatusPill(text: "v\(app.version)", color: .accentColor, icon: "tag.fill")
-                            ModernStatusPill(
-                                text: app.price <= 0 ? "Miễn phí" : app.formattedPrice,
-                                color: app.price <= 0 ? .green : .orange,
-                                icon: app.price <= 0 ? "checkmark" : "cart.fill"
-                            )
-                            ModernStatusPill(
-                                text: platform == "ipad" ? "iPad" : "iPhone",
-                                color: .secondary,
-                                icon: platform == "ipad" ? "ipad" : "iphone"
-                            )
+                        LiquidGlassGroup(spacing: 6) {
+                            HStack(spacing: 6) {
+                                ModernStatusPill(text: "v\(app.version)", color: .accentColor, icon: "tag.fill")
+                                ModernStatusPill(
+                                    text: app.price <= 0 ? "Miễn phí" : app.formattedPrice,
+                                    color: app.price <= 0 ? .green : .orange,
+                                    icon: app.price <= 0 ? "checkmark" : "cart.fill"
+                                )
+                                ModernStatusPill(
+                                    text: platform == "ipad" ? "iPad" : "iPhone",
+                                    color: .secondary,
+                                    icon: platform == "ipad" ? "ipad" : "iphone"
+                                )
+                            }
                         }
                         .padding(.top, 2)
                     }
@@ -138,27 +140,29 @@ struct AppDetailView: View {
                     Spacer(minLength: 0)
                 }
 
-                VStack(spacing: 10) {
-                    Button {
-                        triggerDownload(externalVersionId: "", versionLabel: app.version)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
-                            Text("Tải phiên bản mới nhất (v\(app.version))")
+                LiquidGlassGroup(spacing: 10) {
+                    VStack(spacing: 10) {
+                        Button {
+                            triggerDownload(externalVersionId: "", versionLabel: app.version)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.down.circle.fill")
+                                Text("Tải phiên bản mới nhất (v\(app.version))")
+                            }
                         }
-                    }
-                    .buttonStyle(ModernPrimaryButtonStyle())
+                        .buttonStyle(ModernPrimaryButtonStyle())
 
-                    Button {
-                        manualVersionIdInput = ""
-                        showManualVersionAlert = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "number.circle.fill")
-                            Text("Nhập Version ID thủ công")
+                        Button {
+                            manualVersionIdInput = ""
+                            showManualVersionAlert = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "number.circle.fill")
+                                Text("Nhập Version ID thủ công")
+                            }
                         }
+                        .buttonStyle(ModernSecondaryButtonStyle())
                     }
-                    .buttonStyle(ModernSecondaryButtonStyle())
                 }
             }
         }
@@ -301,12 +305,7 @@ struct AppDetailView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(AppTheme.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 0.75)
-                        )
+                        .liquidGlassRoundedRect(cornerRadius: 13, interactive: false)
                     }
 
                     let visibleIds = filteredVersionIDs(from: orderedIds)
@@ -321,10 +320,11 @@ struct AppDetailView: View {
                         ModernCard(padding: 0, cornerRadius: 16) {
                             LazyVStack(spacing: 0) {
                                 ForEach(visibleIds, id: \.self) { vid in
-                                    versionRow(vid: vid, latestId: history.latestVersionId)
-                                    if vid != visibleIds.last {
-                                        Divider().padding(.leading, 16)
-                                    }
+                                    versionRow(
+                                        vid: vid,
+                                        latestId: history.latestVersionId,
+                                        showDivider: vid != visibleIds.last
+                                    )
                                 }
                             }
                         }
@@ -363,7 +363,7 @@ struct AppDetailView: View {
     }
 
     @ViewBuilder
-    private func versionRow(vid: String, latestId: String) -> some View {
+    private func versionRow(vid: String, latestId: String, showDivider: Bool) -> some View {
         let meta = resolvedMetadata[vid]
         let isLatest = (vid == latestId)
         let displayVer = meta?.displayVersion ?? (isLatest ? app.version : nil)
@@ -404,46 +404,54 @@ struct AppDetailView: View {
 
             Spacer(minLength: 8)
 
-            if displayVer == nil {
-                Button {
-                    fetchMetadata(versionId: vid)
-                } label: {
-                    if loadingVersionId == vid {
-                        ProgressView()
-                            .scaleEffect(0.85)
-                    } else {
-                        Image(systemName: "info.circle")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(AppTheme.subtleSurface)
-                            .clipShape(Circle())
+            HStack(spacing: 8) {
+                if displayVer == nil {
+                    Button {
+                        fetchMetadata(versionId: vid)
+                    } label: {
+                        if loadingVersionId == vid {
+                            ProgressView()
+                                .scaleEffect(0.85)
+                                .frame(width: 32, height: 32)
+                        } else {
+                            Image(systemName: "info.circle")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .frame(width: 32, height: 32)
+                                .background(AppTheme.subtleSurface)
+                                .clipShape(Circle())
+                        }
                     }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    let label = displayVer ?? vid
+                    triggerDownload(externalVersionId: vid, versionLabel: label)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down")
+                            .font(.caption.weight(.bold))
+                        Text("Tải")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.accentColor.opacity(0.14))
+                    .foregroundColor(.accentColor)
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
-
-            Button {
-                let label = displayVer ?? vid
-                triggerDownload(externalVersionId: vid, versionLabel: label)
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down")
-                        .font(.caption.weight(.bold))
-                    Text("Tải")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Color.accentColor.opacity(0.14))
-                .foregroundColor(.accentColor)
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            if showDivider {
+                Divider().padding(.leading, 14)
+            }
+        }
         .contentShape(Rectangle())
         .contextMenu {
             Button {

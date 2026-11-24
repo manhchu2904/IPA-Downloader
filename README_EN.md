@@ -41,9 +41,7 @@ Built on top of [`majd/ipatool`](https://github.com/majd/ipatool) via `gomobile`
 
 - **OS**: iOS / iPadOS 15.0 or later.
 - **TrollStore**: Works out of the box with built-in JIT access and permanent installation.
-- **SideStore / AltStore / StikDebug**:
-  - JIT is only needed when **signing into an Apple ID for the first time** (or when refreshing an expired session).
-  - Once signed in, searching apps, viewing version history, downloading `.ipa` files, and installing via OTA all work without JIT.
+- **SideStore / AltStore / StikDebug**: JIT needs to be enabled (via StikDebug, SideStore, or AltStore) when using the app, as signing in, acquiring licenses, and downloading `.ipa` files from Apple require FairPlay SAP signing.
 
 ---
 

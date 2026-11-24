@@ -215,24 +215,26 @@ struct DownloadsView: View {
 
                 if availableAccountGroups.count > 1 || selectedAccountFilter != "ALL" {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            filterChip(
-                                title: "Tất cả (\(service.downloadedFiles.count))",
-                                isSelected: selectedAccountFilter == "ALL"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    selectedAccountFilter = "ALL"
-                                }
-                            }
-
-                            ForEach(availableAccountGroups, id: \.self) { email in
-                                let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
+                        LiquidGlassGroup(spacing: 8) {
+                            HStack(spacing: 8) {
                                 filterChip(
-                                    title: "\(email) (\(count))",
-                                    isSelected: selectedAccountFilter == email
+                                    title: "Tất cả (\(service.downloadedFiles.count))",
+                                    isSelected: selectedAccountFilter == "ALL"
                                 ) {
                                     withAnimation(.easeInOut(duration: 0.18)) {
-                                        selectedAccountFilter = email
+                                        selectedAccountFilter = "ALL"
+                                    }
+                                }
+
+                                ForEach(availableAccountGroups, id: \.self) { email in
+                                    let count = service.downloadedFiles.filter { $0.accountEmail == email }.count
+                                    filterChip(
+                                        title: "\(email) (\(count))",
+                                        isSelected: selectedAccountFilter == email
+                                    ) {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            selectedAccountFilter = email
+                                        }
                                     }
                                 }
                             }
@@ -251,9 +253,8 @@ struct DownloadsView: View {
                 .lineLimit(1)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(isSelected ? Color.accentColor : AppTheme.subtleSurface)
                 .foregroundColor(isSelected ? .white : .primary)
-                .clipShape(Capsule())
+                .liquidGlassCapsule(tint: isSelected ? Color.accentColor.opacity(0.75) : nil, interactive: true)
         }
         .buttonStyle(.plain)
     }
@@ -419,10 +420,7 @@ struct DownloadsView: View {
             ModernCard(padding: 0, cornerRadius: 16) {
                 VStack(spacing: 0) {
                     ForEach(groupFiles) { file in
-                        downloadedFileRow(file)
-                        if file.id != groupFiles.last?.id {
-                            Divider().padding(.leading, 56)
-                        }
+                        downloadedFileRow(file, showDivider: file.id != groupFiles.last?.id)
                     }
                 }
             }
@@ -435,7 +433,7 @@ struct DownloadsView: View {
     }
 
     @ViewBuilder
-    private func downloadedFileRow(_ file: DownloadedIPA) -> some View {
+    private func downloadedFileRow(_ file: DownloadedIPA, showDivider: Bool) -> some View {
         HStack(spacing: 12) {
             ModernIconBadge(systemName: "shippingbox.fill", gradient: AppTheme.purpleGradient, size: 36, cornerRadius: 10)
 
@@ -458,69 +456,76 @@ struct DownloadsView: View {
 
             Spacer(minLength: 6)
 
-            Button {
-                fileToInstall = file
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.app.fill")
-                        .font(.caption)
-                    Text("Cài")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(AppTheme.primaryGradient)
-                .foregroundColor(.white)
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-
-            Menu {
+            HStack(spacing: 8) {
                 Button {
                     fileToInstall = file
                 } label: {
-                    Label("Cài đặt trực tiếp vào máy (OTA)", systemImage: "arrow.down.app.fill")
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.app.fill")
+                            .font(.caption)
+                        Text("Cài")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(AppTheme.primaryGradient)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
                 }
+                .buttonStyle(.plain)
 
-                Button {
-                    shareURL = file.url
+                Menu {
+                    Button {
+                        fileToInstall = file
+                    } label: {
+                        Label("Cài đặt trực tiếp vào máy (OTA)", systemImage: "arrow.down.app.fill")
+                    }
+
+                    Button {
+                        shareURL = file.url
+                    } label: {
+                        Label("Chia sẻ / Mở qua ESign, TrollStore...", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        newFileName = file.name.replacingOccurrences(of: ".ipa", with: "")
+                        fileToRename = file
+                    } label: {
+                        Label("Đổi tên file .ipa", systemImage: "pencil")
+                    }
+
+                    Button {
+                        UIPasteboard.general.string = "\(file.name) (Apple ID: \(file.accountEmail), Size: \(file.formattedSize))"
+                    } label: {
+                        Label("Sao chép thông tin & Apple ID", systemImage: "doc.on.doc")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        service.deleteDownloadedFile(file)
+                    } label: {
+                        Label("Xóa file", systemImage: "trash")
+                    }
                 } label: {
-                    Label("Chia sẻ / Mở qua ESign, TrollStore...", systemImage: "square.and.arrow.up")
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(AppTheme.subtleSurface)
+                        .clipShape(Circle())
                 }
-
-                Button {
-                    newFileName = file.name.replacingOccurrences(of: ".ipa", with: "")
-                    fileToRename = file
-                } label: {
-                    Label("Đổi tên file .ipa", systemImage: "pencil")
-                }
-
-                Button {
-                    UIPasteboard.general.string = "\(file.name) (Apple ID: \(file.accountEmail), Size: \(file.formattedSize))"
-                } label: {
-                    Label("Sao chép thông tin & Apple ID", systemImage: "doc.on.doc")
-                }
-
-                Divider()
-
-                Button(role: .destructive) {
-                    service.deleteDownloadedFile(file)
-                } label: {
-                    Label("Xóa file", systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(AppTheme.subtleSurface)
-                    .clipShape(Circle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            if showDivider {
+                Divider().padding(.leading, 56)
+            }
+        }
         .contentShape(Rectangle())
         .contextMenu {
             Button {
@@ -793,36 +798,38 @@ private struct IPAInstallerSheet: View {
                             }
                         }
 
-                        VStack(spacing: 10) {
-                            Button {
-                                triggerITMSInstall(session: session)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "arrow.down.app.fill")
-                                    Text("Hiện hộp thoại Cài đặt iOS")
+                        LiquidGlassGroup(spacing: 10) {
+                            VStack(spacing: 10) {
+                                Button {
+                                    triggerITMSInstall(session: session)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "arrow.down.app.fill")
+                                        Text("Hiện hộp thoại Cài đặt iOS")
+                                    }
                                 }
-                            }
-                            .buttonStyle(ModernPrimaryButtonStyle())
+                                .buttonStyle(ModernPrimaryButtonStyle())
 
-                            Button {
-                                let urlStr: String
-                                if useLocalHTTPSMode {
-                                    let host = session.httpsHost ?? "app.localtest.me"
-                                    urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
-                                } else {
-                                    urlStr = session.safariInstallUrl
+                                Button {
+                                    let urlStr: String
+                                    if useLocalHTTPSMode {
+                                        let host = session.httpsHost ?? "app.localtest.me"
+                                        urlStr = "https://\(host):\(session.httpsPort)/install?mode=local"
+                                    } else {
+                                        urlStr = session.safariInstallUrl
+                                    }
+                                    DebugLogger.log("OTA opening Safari URL: \(urlStr)")
+                                    if let url = URL(string: urlStr) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "safari.fill")
+                                        Text("Mở trang cài đặt qua trình duyệt Safari")
+                                    }
                                 }
-                                DebugLogger.log("OTA opening Safari URL: \(urlStr)")
-                                if let url = URL(string: urlStr) {
-                                    UIApplication.shared.open(url)
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "safari.fill")
-                                    Text("Mở trang cài đặt qua trình duyệt Safari")
-                                }
+                                .buttonStyle(ModernSecondaryButtonStyle())
                             }
-                            .buttonStyle(ModernSecondaryButtonStyle())
                         }
                     }
                 }

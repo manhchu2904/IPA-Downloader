@@ -18,6 +18,9 @@ struct IPADownloaderApp: App {
     }
 
     private static func configureBarAppearances() {
+        if #available(iOS 26.0, *) {
+            return
+        }
         let tabBarAppearance = UITabBarAppearance()
         tabBarAppearance.configureWithDefaultBackground()
         UITabBar.appearance().standardAppearance = tabBarAppearance

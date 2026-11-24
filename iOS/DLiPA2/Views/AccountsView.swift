@@ -134,10 +134,7 @@ struct AccountsView: View {
                 ModernCard(padding: 0, cornerRadius: 16) {
                     VStack(spacing: 0) {
                         ForEach(service.accounts) { account in
-                            accountRow(account)
-                            if account.id != service.accounts.last?.id {
-                                Divider().padding(.leading, 62)
-                            }
+                            accountRow(account, showDivider: account.id != service.accounts.last?.id)
                         }
                     }
                 }
@@ -150,7 +147,7 @@ struct AccountsView: View {
         }
     }
 
-    private func accountRow(_ account: AppleAccount) -> some View {
+    private func accountRow(_ account: AppleAccount, showDivider: Bool) -> some View {
         let isSelected = (service.selectedAccount?.id == account.id)
         let initial = String(account.displayName.prefix(1)).uppercased()
 
@@ -212,6 +209,11 @@ struct AccountsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            if showDivider {
+                Divider().padding(.leading, 62)
+            }
+        }
         .contextMenu {
             Button {
                 service.selectedAccountId = account.id
@@ -250,7 +252,7 @@ struct AccountsView: View {
                                     color: jitPoolReady ? .green : .orange
                                 )
                             }
-                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • \(jitEnabled ? "CS_DEBUGGED" : "Cần StikDebug khi đăng nhập")")
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • \(jitEnabled ? "CS_DEBUGGED" : "Cần bật JIT để sử dụng")")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -274,7 +276,7 @@ struct AccountsView: View {
 
                     if !jitEnabled {
                         Divider().padding(.leading, 62)
-                        Text("Hãy mở IPA Downloader qua StikDebug (hoặc TrollStore) để kích hoạt JIT khi đăng nhập tài khoản lần đầu.")
+                        Text("Hãy mở IPA Downloader qua StikDebug (hoặc TrollStore) để bật JIT khi đăng nhập và tải file .ipa.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)

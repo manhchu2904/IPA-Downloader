@@ -41,9 +41,7 @@
 
 - **Hệ điều hành**: iOS / iPadOS 15.0 trở lên.
 - **TrollStore**: Hoạt động thuận tiện nhất vì có sẵn quyền JIT và cài đặt vĩnh viễn.
-- **SideStore / AltStore / StikDebug**:
-  - Chỉ cần bật JIT lúc **đăng nhập Apple ID lần đầu** (hoặc khi phiên đăng nhập hết hạn cần xác thực lại).
-  - Sau khi đã đăng nhập, các thao tác tìm kiếm, xem phiên bản cũ, tải `.ipa` và cài OTA đều chạy bình thường không cần JIT.
+- **SideStore / AltStore / StikDebug**: Cần bật JIT (qua StikDebug, SideStore hoặc AltStore) khi sử dụng ứng dụng, vì quá trình đăng nhập, nhận bản quyền và tải `.ipa` từ Apple đều cần ký FairPlay SAP.
 
 ---
 

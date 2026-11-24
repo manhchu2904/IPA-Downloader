@@ -32,6 +32,7 @@ struct SearchView: View {
                             title: "Chưa đăng nhập Apple ID",
                             subtitle: "Đăng nhập tài khoản Apple ID của bạn để tìm kiếm, xem lịch sử phiên bản cũ và tải trực tiếp file .ipa từ App Store.",
                             gradient: AppTheme.amberGradient,
+                            tintColor: .orange,
                             actionTitle: "Đi tới Tài khoản",
                             actionIcon: "person.badge.plus",
                             action: onOpenAccounts
@@ -39,36 +40,39 @@ struct SearchView: View {
                         .padding(.top, 20)
                     }
                 } else {
-                    VStack(spacing: 0) {
-                        filterHeader
-
-                        if isSearching {
-                            VStack(spacing: 14) {
-                                ProgressView()
-                                    .scaleEffect(1.15)
-                                Text("Đang tìm trên App Store...")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if let errorMessage {
-                            ScrollView {
+                    ScrollView {
+                        Group {
+                            if isSearching {
+                                VStack(spacing: 14) {
+                                    ProgressView()
+                                        .scaleEffect(1.15)
+                                    Text("Đang tìm trên App Store...")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 96)
+                            } else if let errorMessage {
                                 ModernEmptyState(
                                     icon: "exclamationmark.triangle.fill",
                                     title: "Không thể tìm kiếm",
                                     subtitle: errorMessage,
                                     gradient: AppTheme.coralGradient,
+                                    tintColor: .red,
                                     actionTitle: "Thử lại",
                                     actionIcon: "arrow.clockwise",
                                     action: runSearch
                                 )
                                 .padding(.top, 16)
+                            } else if results.isEmpty {
+                                searchEmptyStateContent
+                            } else {
+                                resultsListContent
                             }
-                        } else if results.isEmpty {
-                            searchEmptyState
-                        } else {
-                            resultsList
                         }
+                    }
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        filterHeader
                     }
                 }
             }
@@ -87,101 +91,97 @@ struct SearchView: View {
     }
 
     private var filterHeader: some View {
-        VStack(spacing: 8) {
-            if service.accounts.count > 1, let active = service.selectedAccount {
-                HStack(spacing: 8) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.subheadline)
-                        .foregroundColor(.accentColor)
-                    Text("Apple ID")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        LiquidGlassGroup(spacing: 8) {
+            VStack(spacing: 8) {
+                if service.accounts.count > 1, let active = service.selectedAccount {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.subheadline)
+                            .foregroundColor(.accentColor)
+                        Text("Apple ID")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
+                        Menu {
+                            ForEach(service.accounts) { account in
+                                Button {
+                                    service.selectedAccountId = account.id
+                                    if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                                        runSearch()
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text("\(account.email) (\(account.storefrontCountryCode))")
+                                        if account.id == active.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(active.email)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .foregroundColor(.accentColor)
+                            .liquidGlassCapsule(tint: Color.accentColor.opacity(0.18), interactive: true)
+                        }
+                    }
+                }
+
+                HStack(spacing: 10) {
                     Menu {
-                        ForEach(service.accounts) { account in
+                        ForEach(Storefront.all) { sf in
                             Button {
-                                service.selectedAccountId = account.id
+                                selectedStorefront = sf
                                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                                     runSearch()
                                 }
                             } label: {
                                 HStack {
-                                    Text("\(account.email) (\(account.storefrontCountryCode))")
-                                    if account.id == active.id {
+                                    Text("\(sf.flag) \(sf.name) (\(sf.code))")
+                                    if sf.id == selectedStorefront.id {
                                         Image(systemName: "checkmark")
                                     }
                                 }
                             }
                         }
                     } label: {
-                        HStack(spacing: 5) {
-                            Text(active.email)
-                                .font(.caption)
+                        HStack(spacing: 6) {
+                            Text(selectedStorefront.flag)
+                                .font(.subheadline)
+                            Text(selectedStorefront.code)
+                                .font(.subheadline)
                                 .fontWeight(.semibold)
-                                .lineLimit(1)
-                            Image(systemName: "chevron.up.chevron.down")
+                            Image(systemName: "chevron.down")
                                 .font(.caption2)
+                                .foregroundColor(.secondary)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.accentColor.opacity(0.12))
-                        .foregroundColor(.accentColor)
-                        .clipShape(Capsule())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .foregroundColor(.primary)
+                        .liquidGlassRoundedRect(cornerRadius: 10, interactive: true)
                     }
-                }
-            }
 
-            HStack(spacing: 10) {
-                Menu {
-                    ForEach(Storefront.all) { sf in
-                        Button {
-                            selectedStorefront = sf
-                            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                                runSearch()
-                            }
-                        } label: {
-                            HStack {
-                                Text("\(sf.flag) \(sf.name) (\(sf.code))")
-                                if sf.id == selectedStorefront.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
+                    Picker("Nền tảng", selection: $selectedPlatform) {
+                        ForEach(platforms, id: \.0) { item in
+                            Text(item.1).tag(item.0)
                         }
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(selectedStorefront.flag)
-                            .font(.subheadline)
-                        Text(selectedStorefront.code)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Image(systemName: "chevron.down")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(AppTheme.cardBackground)
-                    .foregroundColor(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 0.75)
-                    )
+                    .pickerStyle(.segmented)
                 }
-
-                Picker("Nền tảng", selection: $selectedPlatform) {
-                    ForEach(platforms, id: \.0) { item in
-                        Text(item.1).tag(item.0)
-                    }
-                }
-                .pickerStyle(.segmented)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .overlay(
             Rectangle()
@@ -191,51 +191,49 @@ struct SearchView: View {
         )
     }
 
-    private var searchEmptyState: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                ModernEmptyState(
-                    icon: "magnifyingglass",
-                    title: "Khám phá & Tải gói .ipa",
-                    subtitle: "Tìm ứng dụng theo tên, Bundle ID, mã App ID hoặc dán trực tiếp liên kết chia sẻ từ App Store.",
-                    gradient: AppTheme.primaryGradient,
-                    compact: true
-                )
+    private var searchEmptyStateContent: some View {
+        VStack(spacing: 14) {
+            ModernEmptyState(
+                icon: "magnifyingglass",
+                title: "Khám phá & Tải gói .ipa",
+                subtitle: "Tìm ứng dụng theo tên, Bundle ID, mã App ID hoặc dán trực tiếp liên kết chia sẻ từ App Store.",
+                gradient: AppTheme.primaryGradient,
+                compact: true
+            )
 
-                ModernCard(padding: 13, cornerRadius: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("HỖ TRỢ TÌM NHANH")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
+            ModernCard(padding: 13, cornerRadius: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("HỖ TRỢ TÌM NHANH")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
 
-                        searchTipRow(icon: "text.magnifyingglass", gradient: AppTheme.primaryGradient, title: "Tên ứng dụng", example: "Spotify, Facebook, TikTok...")
-                        Divider()
-                        searchTipRow(icon: "link", gradient: AppTheme.purpleGradient, title: "Link App Store", example: "https://apps.apple.com/...")
-                        Divider()
-                        searchTipRow(icon: "tag.fill", gradient: AppTheme.emeraldGradient, title: "Bundle ID / App ID", example: "com.spotify.client hoặc 324684580")
-                    }
+                    searchTipRow(icon: "text.magnifyingglass", gradient: AppTheme.primaryGradient, title: "Tên ứng dụng", example: "Spotify, Facebook, TikTok...")
+                    Divider()
+                    searchTipRow(icon: "link", gradient: AppTheme.purpleGradient, title: "Link App Store", example: "https://apps.apple.com/...")
+                    Divider()
+                    searchTipRow(icon: "tag.fill", gradient: AppTheme.emeraldGradient, title: "Bundle ID / App ID", example: "com.spotify.client hoặc 324684580")
                 }
-                .padding(.horizontal, 16)
-
-                Button {
-                    if let pasted = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !pasted.isEmpty {
-                        query = pasted
-                        runSearch()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.on.clipboard.fill")
-                        Text("Dán & Tìm từ Bảng nhớ tạm")
-                    }
-                }
-                .buttonStyle(ModernSecondaryButtonStyle())
-                .padding(.horizontal, 16)
             }
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.horizontal, 16)
+
+            Button {
+                if let pasted = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !pasted.isEmpty {
+                    query = pasted
+                    runSearch()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.on.clipboard.fill")
+                    Text("Dán & Tìm từ Bảng nhớ tạm")
+                }
+            }
+            .buttonStyle(ModernSecondaryButtonStyle())
+            .padding(.horizontal, 16)
         }
+        .padding(.top, 8)
+        .padding(.bottom, 24)
     }
 
     private func searchTipRow(icon: String, gradient: LinearGradient, title: String, example: String) -> some View {
@@ -254,24 +252,22 @@ struct SearchView: View {
         }
     }
 
-    private var resultsList: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ModernSectionHeader(title: "Kết quả tìm kiếm", trailing: "\(results.count) ứng dụng")
-                    .padding(.top, 6)
+    private var resultsListContent: some View {
+        LazyVStack(spacing: 10) {
+            ModernSectionHeader(title: "Kết quả tìm kiếm", trailing: "\(results.count) ứng dụng")
+                .padding(.top, 8)
 
-                ForEach(results) { app in
-                    NavigationLink {
-                        AppDetailView(app: app, platform: selectedPlatform, onOpenDownloads: onOpenDownloads)
-                    } label: {
-                        SearchAppCard(app: app)
-                    }
-                    .buttonStyle(.plain)
+            ForEach(results) { app in
+                NavigationLink {
+                    AppDetailView(app: app, platform: selectedPlatform, onOpenDownloads: onOpenDownloads)
+                } label: {
+                    SearchAppCard(app: app)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 24)
     }
 
     private func runSearch() {
@@ -357,29 +353,49 @@ private struct SearchAppCard: View {
     }
 }
 
+private final class AppIconCache {
+    static let shared = AppIconCache()
+    private let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200
+        return c
+    }()
+
+    func image(for urlString: String) -> UIImage? {
+        cache.object(forKey: urlString as NSString)
+    }
+
+    func setImage(_ image: UIImage, for urlString: String) {
+        cache.setObject(image, forKey: urlString as NSString)
+    }
+}
+
 struct AppIconView: View {
     let urlString: String?
     var size: CGFloat = 52
+
+    @State private var loadedImage: UIImage?
 
     private var cornerRadius: CGFloat {
         size * 0.225
     }
 
+    private var resolvedImage: UIImage? {
+        if let loadedImage {
+            return loadedImage
+        }
+        if let urlString {
+            return AppIconCache.shared.image(for: urlString)
+        }
+        return nil
+    }
+
     var body: some View {
         Group {
-            if let urlString, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .empty, .failure:
-                        placeholder
-                    @unknown default:
-                        placeholder
-                    }
-                }
+            if let uiImage = resolvedImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
             } else {
                 placeholder
             }
@@ -390,7 +406,34 @@ struct AppIconView: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
         )
-        .shadow(color: Color.black.opacity(0.08), radius: size > 64 ? 8 : 4, x: 0, y: 2)
+        .task(id: urlString) {
+            guard let urlString, !urlString.isEmpty else {
+                loadedImage = nil
+                return
+            }
+            if let cached = AppIconCache.shared.image(for: urlString) {
+                if loadedImage !== cached {
+                    loadedImage = cached
+                }
+                return
+            }
+            loadedImage = nil
+            guard let url = URL(string: urlString) else { return }
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard !Task.isCancelled else { return }
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    return
+                }
+                guard let decoded = UIImage(data: data) else { return }
+                let prepared = await decoded.byPreparingForDisplay() ?? decoded
+                guard !Task.isCancelled else { return }
+                AppIconCache.shared.setImage(prepared, for: urlString)
+                loadedImage = prepared
+            } catch {
+                // Keep placeholder if network fetch fails or is cancelled
+            }
+        }
     }
 
     private var placeholder: some View {

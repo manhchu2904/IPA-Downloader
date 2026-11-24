@@ -23,7 +23,7 @@ permissions:
 jobs:
   nightly-ios:
     name: Build Nightly IPA
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       BUILD_CONFIG: ${{ inputs.configuration || 'Release' }}
 

@@ -59,6 +59,120 @@ enum AppTheme {
     static let groupedBackground = Color(UIColor.systemGroupedBackground)
     static let cardBackground = Color(UIColor.secondarySystemGroupedBackground)
     static let subtleSurface = Color(UIColor.tertiarySystemGroupedBackground)
+
+    static let glassRimGradient = LinearGradient(
+        colors: [
+            Color.white.opacity(0.45),
+            Color.white.opacity(0.08),
+            Color.white.opacity(0.22)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+struct LiquidGlassGroup<Content: View>: View {
+    var spacing: CGFloat = 8
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content()
+            }
+        } else {
+            content()
+        }
+        #else
+        content()
+        #endif
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func liquidGlassCapsule(tint: Color? = nil, interactive: Bool = false) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            let base = tint.map { Glass.regular.tint($0) } ?? Glass.regular
+            let resolved = interactive ? base.interactive() : base
+            self.glassEffect(resolved, in: .capsule)
+        } else {
+            self
+                .background(tint ?? Color.clear, in: Capsule())
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+                )
+        }
+        #else
+        self
+            .background(tint ?? Color.clear, in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+            )
+        #endif
+    }
+
+    @ViewBuilder
+    func liquidGlassRoundedRect(cornerRadius: CGFloat = 16, tint: Color? = nil, interactive: Bool = false) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            let base = tint.map { Glass.regular.tint($0) } ?? Glass.regular
+            let resolved = interactive ? base.interactive() : base
+            self.glassEffect(resolved, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            self
+                .background(tint ?? Color.clear, in: shape)
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(
+                    shape
+                        .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+                )
+        }
+        #else
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        self
+            .background(tint ?? Color.clear, in: shape)
+            .background(.ultraThinMaterial, in: shape)
+            .overlay(
+                shape
+                    .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+            )
+        #endif
+    }
+
+    @ViewBuilder
+    func liquidGlassCircle(tint: Color? = nil, interactive: Bool = false) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            let base = tint.map { Glass.regular.tint($0) } ?? Glass.regular
+            let resolved = interactive ? base.interactive() : base
+            self.glassEffect(resolved, in: .circle)
+        } else {
+            self
+                .background(tint ?? Color.clear, in: Circle())
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+                )
+        }
+        #else
+        self
+            .background(tint ?? Color.clear, in: Circle())
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(AppTheme.glassRimGradient, lineWidth: 0.75)
+            )
+        #endif
+    }
 }
 
 struct ModernCard<Content: View>: View {
@@ -67,17 +181,15 @@ struct ModernCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content()
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(AppTheme.cardBackground)
+                shape.fill(AppTheme.cardBackground)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.75)
+                shape.stroke(Color.primary.opacity(0.07), lineWidth: 0.75)
             )
-            .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
     }
 }
 
@@ -121,49 +233,107 @@ struct ModernStatusPill: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(color.opacity(0.14))
         .foregroundColor(color)
+        .background(color.opacity(0.14))
         .clipShape(Capsule())
     }
 }
 
 struct ModernPrimaryButtonStyle: ButtonStyle {
     var gradient: LinearGradient = AppTheme.primaryGradient
+    var tintColor: Color = .accentColor
     var isDisabled: Bool = false
     var fullWidth: Bool = true
     var cornerRadius: CGFloat = 14
 
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let content = configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundColor(.white)
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .padding(.vertical, fullWidth ? 13 : 12)
             .padding(.horizontal, fullWidth ? 16 : 24)
+
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            let glass: Glass = isDisabled
+                ? .regular.tint(tintColor.opacity(0.42))
+                : .regular.tint(tintColor.opacity(0.72)).interactive()
+
+            if fullWidth {
+                content
+                    .background(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(gradient)
+                            .opacity(isDisabled ? 0.42 : (configuration.isPressed ? 0.80 : 0.88))
+                    )
+                    .glassEffect(glass, in: .rect(cornerRadius: cornerRadius))
+                    .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+                    .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            } else {
+                content
+                    .background(
+                        Capsule()
+                            .fill(gradient)
+                            .opacity(isDisabled ? 0.42 : (configuration.isPressed ? 0.80 : 0.88))
+                    )
+                    .glassEffect(glass, in: .capsule)
+                    .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+                    .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            }
+        } else {
+            legacyBody(content: content, isPressed: configuration.isPressed)
+        }
+        #else
+        legacyBody(content: content, isPressed: configuration.isPressed)
+        #endif
+    }
+
+    private func legacyBody<Content: View>(content: Content, isPressed: Bool) -> some View {
+        content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(gradient)
-                    .opacity(isDisabled ? 0.45 : (configuration.isPressed ? 0.85 : 1.0))
+                    .opacity(isDisabled ? 0.45 : (isPressed ? 0.85 : 1.0))
             )
-            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: isPressed)
     }
 }
 
 struct ModernSecondaryButtonStyle: ButtonStyle {
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let content = configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundColor(.accentColor)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
+
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.22)).interactive(), in: .rect(cornerRadius: 14))
+                .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+                .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+        } else {
+            legacyBody(content: content, isPressed: configuration.isPressed)
+        }
+        #else
+        legacyBody(content: content, isPressed: configuration.isPressed)
+        #endif
+    }
+
+    private func legacyBody<Content: View>(content: Content, isPressed: Bool) -> some View {
+        content
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.accentColor.opacity(configuration.isPressed ? 0.2 : 0.12))
+                    .fill(Color.accentColor.opacity(isPressed ? 0.2 : 0.12))
             )
-            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: isPressed)
     }
 }
 
@@ -172,6 +342,7 @@ struct ModernEmptyState: View {
     let title: String
     let subtitle: String
     var gradient: LinearGradient = AppTheme.primaryGradient
+    var tintColor: Color = .accentColor
     var compact: Bool = false
     var actionTitle: String? = nil
     var actionIcon: String? = nil
@@ -215,7 +386,7 @@ struct ModernEmptyState: View {
                         Text(actionTitle)
                     }
                 }
-                .buttonStyle(ModernPrimaryButtonStyle(gradient: gradient, fullWidth: false, cornerRadius: 24))
+                .buttonStyle(ModernPrimaryButtonStyle(gradient: gradient, tintColor: tintColor, fullWidth: false, cornerRadius: 24))
                 .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 4)
                 .padding(.top, 4)
             }
@@ -257,7 +428,7 @@ struct ModernFloatingToast: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
+        let toastContent = HStack(spacing: 12) {
             ModernIconBadge(systemName: icon, gradient: AppTheme.emeraldGradient, size: 34, cornerRadius: 10)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -290,11 +461,20 @@ struct ModernFloatingToast: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.75)
-        )
+
+        Group {
+            if #available(iOS 26.0, *) {
+                toastContent
+                    .liquidGlassRoundedRect(cornerRadius: 20, interactive: false)
+            } else {
+                toastContent
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 0.75)
+                    )
+            }
+        }
         .shadow(color: Color.black.opacity(0.14), radius: 14, x: 0, y: 6)
         .padding(.horizontal, 16)
         .padding(.bottom, 12)

@@ -18,28 +18,32 @@ struct DebugLogView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        ModernStatusPill(text: "\(lineCount) dòng", color: .accentColor, icon: "terminal.fill")
-                        Spacer()
-                        Button {
-                            UIPasteboard.general.string = logText
-                            copied = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                copied = false
+                    LiquidGlassGroup(spacing: 8) {
+                        HStack(spacing: 8) {
+                            ModernStatusPill(text: "\(lineCount) dòng", color: .accentColor, icon: "terminal.fill")
+                            Spacer()
+                            Button {
+                                UIPasteboard.general.string = logText
+                                copied = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    copied = false
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                    Text(copied ? "Đã copy" : "Copy toàn bộ")
+                                }
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .foregroundColor(copied ? .green : .accentColor)
+                                .liquidGlassCapsule(
+                                    tint: copied ? Color.green.opacity(0.22) : Color.accentColor.opacity(0.18),
+                                    interactive: true
+                                )
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                                Text(copied ? "Đã copy" : "Copy toàn bộ")
-                            }
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
-                            .background(copied ? Color.green.opacity(0.16) : Color.accentColor.opacity(0.14))
-                            .foregroundColor(copied ? .green : .accentColor)
-                            .clipShape(Capsule())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
