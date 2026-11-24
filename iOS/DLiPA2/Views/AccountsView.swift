@@ -8,7 +8,9 @@ struct AccountsView: View {
     @State private var errorAlert: String?
     @State private var accountToRemove: AppleAccount?
     @State private var jitEnabled = JITHelper.isJITEnabled()
-    @State private var jitPoolReady = JITHelper.isJITPoolReady()
+    @State private var jitBadgeText = JITHelper.activeModeBadgeText()
+    @State private var jitDetailText = JITHelper.activeModeDetailText()
+    @State private var jitMechanismSummary = JITHelper.activeMechanismSummary(iosVersion: UIDevice.current.systemVersion)
     @AppStorage("otaUseLocalHTTPS") private var otaUseLocalHTTPS = false
 
     var body: some View {
@@ -66,8 +68,7 @@ struct AccountsView: View {
                 DebugLogView()
             }
             .onAppear {
-                jitEnabled = JITHelper.isJITEnabled()
-                jitPoolReady = JITHelper.isJITPoolReady()
+                refreshJITState()
                 Task {
                     await service.refreshLocalCATrustState()
                 }
@@ -248,11 +249,11 @@ struct AccountsView: View {
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                 ModernStatusPill(
-                                    text: jitPoolReady ? "Pool 32 MB" : "Chưa cấp phát",
-                                    color: jitPoolReady ? .green : .orange
+                                    text: jitBadgeText,
+                                    color: jitEnabled ? .green : .orange
                                 )
                             }
-                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • \(jitEnabled ? "CS_DEBUGGED" : "Cần bật JIT để sử dụng")")
+                            Text("Flags: \(JITHelper.codeSigningFlagsHex()) • \(jitDetailText)")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -436,7 +437,12 @@ struct AccountsView: View {
                     Divider().padding(.leading, 56)
                     infoRow(icon: "cpu", gradient: AppTheme.purpleGradient, title: "Core Engine", value: "ipatool • Unicorn 2.1.4")
                     Divider().padding(.leading, 56)
-                    infoRow(icon: "memorychip", gradient: AppTheme.emeraldGradient, title: "Cơ chế JIT", value: "Split-W^X (iOS \(UIDevice.current.systemVersion))")
+                    infoRow(
+                        icon: "memorychip",
+                        gradient: jitEnabled ? AppTheme.emeraldGradient : AppTheme.slateGradient,
+                        title: "Cơ chế JIT",
+                        value: jitMechanismSummary
+                    )
 
                     if let repoURL = URL(string: "https://github.com/manhchu2904/IPA-Downloader") {
                         Divider().padding(.leading, 56)
@@ -532,9 +538,11 @@ struct AccountsView: View {
     }
 
     private func refreshJITState() {
-        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        JITHelper.prepareStartupJITPoolIfNeeded()
         jitEnabled = JITHelper.isJITEnabled()
-        jitPoolReady = JITHelper.isJITPoolReady()
+        jitBadgeText = JITHelper.activeModeBadgeText()
+        jitDetailText = JITHelper.activeModeDetailText()
+        jitMechanismSummary = JITHelper.activeMechanismSummary(iosVersion: UIDevice.current.systemVersion)
     }
 
     private func openLocalCACertInSafari() {

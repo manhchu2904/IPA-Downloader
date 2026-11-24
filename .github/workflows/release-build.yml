@@ -103,8 +103,10 @@ jobs:
       - name: Package Release IPA
         working-directory: iOS
         run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/DLiPA2.app"
+          codesign --force --sign - --entitlements DLiPA2/DLiPA2.entitlements --timestamp=none "$APP_PATH"
           mkdir -p dist/Payload
-          cp -R "build/Build/Products/Release-iphoneos/DLiPA2.app" dist/Payload/
+          cp -R "$APP_PATH" dist/Payload/
           cd dist
           IPA_NAME="IPADownloader-v${{ steps.version.outputs.app_version }}.ipa"
           zip -r "../${IPA_NAME}" Payload

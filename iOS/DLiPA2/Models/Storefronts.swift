@@ -6,7 +6,7 @@ struct Storefront: Identifiable, Hashable {
     let name: String    // Display name
     let flag: String
 
-    static let accountDefault = Storefront(id: "", code: "AUTO", name: "Account Default", flag: "🌐")
+    static let accountDefault = Storefront(id: "", code: "AUTO", name: "Tài khoản mặc định", flag: "🌐")
 
     static let all: [Storefront] = [
         .accountDefault,

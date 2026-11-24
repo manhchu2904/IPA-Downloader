@@ -138,7 +138,7 @@ final class IPAToolService: ObservableObject {
         guard let client else {
             throw NSError(domain: "IPADownloader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Core not initialized"])
         }
-        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        JITHelper.prepareStartupJITPoolIfNeeded()
         DebugLogger.log("login() start: JIT=\(JITHelper.isJITEnabled()) poolReady=\(JITHelper.isJITPoolReady()) flags=\(JITHelper.codeSigningFlagsHex()) has2FA=\(!authCode.isEmpty)")
         do {
             try await ensureRuntimePrepared()
@@ -331,6 +331,8 @@ final class IPAToolService: ObservableObject {
         guard let account = selectedAccount else {
             throw NSError(domain: "IPADownloader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
+        JITHelper.prepareStartupJITPoolIfNeeded()
+        try await ensureRuntimePrepared()
         let json = try await runBridge { errPtr in
             client.listVersions(account.id, appID: app.id, bundleID: app.bundleId, price: app.price, platformName: platform, purchaseIfNeeded: purchaseIfNeeded, error: errPtr)
         }
@@ -354,6 +356,8 @@ final class IPAToolService: ObservableObject {
         guard let account = selectedAccount else {
             throw NSError(domain: "IPADownloader", code: -2, userInfo: [NSLocalizedDescriptionKey: "Vui lòng đăng nhập Apple ID trước."])
         }
+        JITHelper.prepareStartupJITPoolIfNeeded()
+        try await ensureRuntimePrepared()
         let json = try await runBridge { errPtr in
             client.getVersionMetadata(account.id, appID: app.id, bundleID: app.bundleId, versionID: versionId, platformName: platform, error: errPtr)
         }
@@ -423,6 +427,8 @@ final class IPAToolService: ObservableObject {
 
         Task {
             do {
+                JITHelper.prepareStartupJITPoolIfNeeded()
+                try await ensureRuntimePrepared()
                 _ = try await runBridge { errPtr in
                     client.download(
                         downloadId,
@@ -453,6 +459,7 @@ final class IPAToolService: ObservableObject {
                 )
                 refreshDownloadedFiles()
             } catch {
+                DebugLogger.log("download() error (\(app.bundleId)): \(error.localizedDescription)")
                 if let idx = activeDownloads.firstIndex(where: { $0.id == downloadId }) {
                     activeDownloads[idx].speedBytesPerSec = 0
                     activeDownloads[idx].stage = "failed"

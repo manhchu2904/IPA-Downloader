@@ -12,6 +12,8 @@ targets:
     deploymentTarget: "15.0"
     sources:
       - path: DLiPA2
+        excludes:
+          - "*.entitlements"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dlipa2.app

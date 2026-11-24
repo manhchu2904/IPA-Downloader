@@ -4,6 +4,7 @@ import Darwin
 enum DebugLogger {
     private static let lock = NSLock()
     private static let maxLogBytes = 512 * 1024
+    private static let isoFormatter = ISO8601DateFormatter()
 
     static var logURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -20,7 +21,7 @@ enum DebugLogger {
     static func log(_ message: String) {
         lock.lock()
         defer { lock.unlock() }
-        let ts = ISO8601DateFormatter().string(from: Date())
+        let ts = isoFormatter.string(from: Date())
         fputs("[\(ts)] \(message)\n", stderr)
     }
 
@@ -32,7 +33,7 @@ enum DebugLogger {
         lock.lock()
         defer { lock.unlock() }
         try? "".write(to: logURL, atomically: true, encoding: .utf8)
-        let ts = ISO8601DateFormatter().string(from: Date())
+        let ts = isoFormatter.string(from: Date())
         fputs("[\(ts)] Log cleared\n", stderr)
     }
 

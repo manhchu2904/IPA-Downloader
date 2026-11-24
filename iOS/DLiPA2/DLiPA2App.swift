@@ -14,7 +14,7 @@ struct IPADownloaderApp: App {
     init() {
         Self.configureBarAppearances()
         DebugLogger.start()
-        JITHelper.prepareStartupJIT26PoolIfNeeded()
+        JITHelper.prepareStartupJITPoolIfNeeded()
     }
 
     private static func configureBarAppearances() {
