@@ -254,12 +254,13 @@ struct ModernPrimaryButtonStyle: ButtonStyle {
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .padding(.vertical, fullWidth ? 13 : 12)
             .padding(.horizontal, fullWidth ? 16 : 24)
+            .contentShape(Rectangle())
 
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             let glass: Glass = isDisabled
                 ? .regular.tint(tintColor.opacity(0.42))
-                : .regular.tint(tintColor.opacity(0.72)).interactive()
+                : .regular.tint(tintColor.opacity(0.72))
 
             if fullWidth {
                 content
@@ -311,11 +312,12 @@ struct ModernSecondaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
+            .contentShape(Rectangle())
 
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             content
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.22)).interactive(), in: .rect(cornerRadius: 14))
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.22)), in: .rect(cornerRadius: 14))
                 .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
                 .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
         } else {
@@ -337,6 +339,54 @@ struct ModernSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+struct ModernSearchBar: View {
+    @Binding var text: String
+    let prompt: String
+    var onSubmit: (() -> Void)? = nil
+    var onClear: (() -> Void)? = nil
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.secondary)
+
+            TextField(prompt, text: $text)
+                .font(.subheadline)
+                .focused($isFocused)
+                .submitLabel(.search)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .onSubmit {
+                    onSubmit?()
+                }
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    isFocused = false
+                    onClear?()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Capsule())
+        .onTapGesture {
+            isFocused = true
+        }
+        .liquidGlassCapsule(interactive: false)
+        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+}
+
 struct ModernEmptyState: View {
     let icon: String
     let title: String
@@ -349,22 +399,22 @@ struct ModernEmptyState: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: compact ? 12 : 16) {
+        VStack(spacing: compact ? 8 : 16) {
             ZStack {
                 Circle()
                     .fill(gradient)
                     .opacity(0.12)
-                    .frame(width: compact ? 68 : 80, height: compact ? 68 : 80)
+                    .frame(width: compact ? 58 : 80, height: compact ? 58 : 80)
                 Circle()
                     .fill(gradient)
-                    .frame(width: compact ? 48 : 58, height: compact ? 48 : 58)
+                    .frame(width: compact ? 42 : 58, height: compact ? 42 : 58)
                     .shadow(color: Color.accentColor.opacity(0.25), radius: 10, x: 0, y: 5)
                 Image(systemName: icon)
-                    .font(.system(size: compact ? 21 : 25, weight: .semibold))
+                    .font(.system(size: compact ? 18 : 25, weight: .semibold))
                     .foregroundColor(.white)
             }
 
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 Text(title)
                     .font(.headline)
                     .multilineTextAlignment(.center)
@@ -393,7 +443,7 @@ struct ModernEmptyState: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
-        .padding(.vertical, compact ? 12 : 22)
+        .padding(.vertical, compact ? 6 : 22)
     }
 }
 

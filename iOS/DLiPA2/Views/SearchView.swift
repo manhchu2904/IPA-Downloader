@@ -13,6 +13,8 @@ struct SearchView: View {
     @State private var results: [AppItem] = []
     @State private var isSearching = false
     @State private var errorMessage: String?
+    @State private var showEmptyClipboardAlert = false
+    @State private var searchTask: Task<Void, Never>?
 
     private let platforms = [
         ("iphone", "iPhone"),
@@ -41,7 +43,9 @@ struct SearchView: View {
                     }
                 } else {
                     ScrollView {
-                        Group {
+                        VStack(spacing: 12) {
+                            filterHeader
+
                             if isSearching {
                                 VStack(spacing: 14) {
                                     ProgressView()
@@ -51,7 +55,7 @@ struct SearchView: View {
                                         .foregroundColor(.secondary)
                                 }
                                 .frame(maxWidth: .infinity)
-                                .padding(.top, 96)
+                                .padding(.top, 72)
                             } else if let errorMessage {
                                 ModernEmptyState(
                                     icon: "exclamationmark.triangle.fill",
@@ -61,79 +65,41 @@ struct SearchView: View {
                                     tintColor: .red,
                                     actionTitle: "Thử lại",
                                     actionIcon: "arrow.clockwise",
-                                    action: runSearch
+                                    action: { runSearch() }
                                 )
-                                .padding(.top, 16)
+                                .padding(.top, 12)
                             } else if results.isEmpty {
                                 searchEmptyStateContent
                             } else {
                                 resultsListContent
                             }
                         }
-                    }
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        filterHeader
+                        .padding(.top, 4)
                     }
                 }
             }
             .navigationTitle("IPA Downloader")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(
-                text: $query,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Tên app, Bundle ID, App ID hoặc link App Store..."
-            )
-            .onSubmit(of: .search) {
-                runSearch()
+            .alert("Bảng nhớ tạm trống", isPresented: $showEmptyClipboardAlert) {
+                Button("Đóng", role: .cancel) {}
+            } message: {
+                Text("Hãy sao chép tên ứng dụng, Bundle ID, App ID hoặc liên kết App Store trước khi dán.")
             }
         }
         .navigationViewStyle(.stack)
     }
 
     private var filterHeader: some View {
-        LiquidGlassGroup(spacing: 8) {
-            VStack(spacing: 8) {
-                if service.accounts.count > 1, let active = service.selectedAccount {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.subheadline)
-                            .foregroundColor(.accentColor)
-                        Text("Apple ID")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Spacer(minLength: 8)
-
-                        Menu {
-                            ForEach(service.accounts) { account in
-                                Button {
-                                    service.selectedAccountId = account.id
-                                    if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                                        runSearch()
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text("\(account.email) (\(account.storefrontCountryCode))")
-                                        if account.id == active.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text(active.email)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption2)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .foregroundColor(.accentColor)
-                            .liquidGlassCapsule(tint: Color.accentColor.opacity(0.18), interactive: true)
-                        }
+        LiquidGlassGroup(spacing: 10) {
+            VStack(spacing: 10) {
+                ModernSearchBar(
+                    text: $query,
+                    prompt: "Tên app, Bundle ID, App ID hoặc link App Store...",
+                    onSubmit: { runSearch() },
+                    onClear: { clearSearchResults() }
+                )
+                .onChange(of: query) { newValue in
+                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        clearSearchResults()
                     }
                 }
 
@@ -177,22 +143,19 @@ struct SearchView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: selectedPlatform) { _ in
+                        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            runSearch()
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
         }
-        .background(.ultraThinMaterial)
-        .overlay(
-            Rectangle()
-                .fill(Color.primary.opacity(0.06))
-                .frame(height: 0.5),
-            alignment: .bottom
-        )
     }
 
     private var searchEmptyStateContent: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             ModernEmptyState(
                 icon: "magnifyingglass",
                 title: "Khám phá & Tải gói .ipa",
@@ -201,8 +164,8 @@ struct SearchView: View {
                 compact: true
             )
 
-            ModernCard(padding: 13, cornerRadius: 16) {
-                VStack(alignment: .leading, spacing: 10) {
+            ModernCard(padding: 12, cornerRadius: 16) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("HỖ TRỢ TÌM NHANH")
                         .font(.caption2)
                         .fontWeight(.semibold)
@@ -218,11 +181,7 @@ struct SearchView: View {
             .padding(.horizontal, 16)
 
             Button {
-                if let pasted = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !pasted.isEmpty {
-                    query = pasted
-                    runSearch()
-                }
+                pasteAndSearchFromClipboard()
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.on.clipboard.fill")
@@ -232,8 +191,7 @@ struct SearchView: View {
             .buttonStyle(ModernSecondaryButtonStyle())
             .padding(.horizontal, 16)
         }
-        .padding(.top, 8)
-        .padding(.bottom, 24)
+        .padding(.bottom, 20)
     }
 
     private func searchTipRow(icon: String, gradient: LinearGradient, title: String, example: String) -> some View {
@@ -270,22 +228,57 @@ struct SearchView: View {
         .padding(.bottom, 24)
     }
 
-    private func runSearch() {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    private func pasteAndSearchFromClipboard() {
+        let pb = UIPasteboard.general
+        let raw = pb.string
+            ?? pb.url?.absoluteString
+            ?? pb.strings?.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            ?? pb.urls?.first?.absoluteString
 
+        guard let pasted = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !pasted.isEmpty else {
+            showEmptyClipboardAlert = true
+            return
+        }
+        query = pasted
+        runSearch(explicitTerm: pasted)
+    }
+
+    private func clearSearchResults() {
+        searchTask?.cancel()
+        searchTask = nil
+        isSearching = false
+        errorMessage = nil
+        results = []
+    }
+
+    private func runSearch(explicitTerm: String? = nil) {
+        let trimmed = (explicitTerm ?? query).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            clearSearchResults()
+            return
+        }
+
+        searchTask?.cancel()
         isSearching = true
         errorMessage = nil
 
-        Task {
-            defer { isSearching = false }
+        searchTask = Task {
+            defer {
+                if !Task.isCancelled {
+                    isSearching = false
+                }
+            }
             do {
-                results = try await service.search(
+                let fetched = try await service.search(
                     term: trimmed,
                     storefrontId: selectedStorefront.id,
                     platform: selectedPlatform
                 )
+                guard !Task.isCancelled else { return }
+                results = fetched
             } catch {
+                guard !Task.isCancelled else { return }
                 errorMessage = error.localizedDescription
                 results = []
             }
@@ -295,6 +288,11 @@ struct SearchView: View {
 
 private struct SearchAppCard: View {
     let app: AppItem
+
+    private static func compactVersion(_ version: String, maxLength: Int = 14) -> String {
+        guard version.count > maxLength else { return version }
+        return String(version.prefix(maxLength - 1)) + "…"
+    }
 
     var body: some View {
         ModernCard(padding: 13, cornerRadius: 16) {
@@ -316,9 +314,11 @@ private struct SearchAppCard: View {
                     }
 
                     HStack(spacing: 6) {
-                        Text("v\(app.version)")
+                        Text("v\(Self.compactVersion(app.version))")
                             .font(.caption2)
                             .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(AppTheme.subtleSurface)
@@ -329,6 +329,7 @@ private struct SearchAppCard: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
 

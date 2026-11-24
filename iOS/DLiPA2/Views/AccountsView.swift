@@ -447,7 +447,7 @@ struct AccountsView: View {
                     if let repoURL = URL(string: "https://github.com/manhchu2904/IPA-Downloader") {
                         Divider().padding(.leading, 56)
                         Link(destination: repoURL) {
-                            linkRow(icon: "chevron.left.forwardslash.chevron.right", gradient: AppTheme.slateGradient, title: "Mã nguồn (GitHub)", value: "manhchu2904/IPA-Downloader")
+                            linkRow(icon: "chevron.left.forwardslash.chevron.right", gradient: AppTheme.slateGradient, title: "Mã nguồn", value: "manhchu2904/IPA-Downloader")
                         }
                     }
 
@@ -474,29 +474,31 @@ struct AccountsView: View {
             ModernIconBadge(systemName: icon, gradient: gradient, size: 30, cornerRadius: 8)
             Text(title)
                 .font(.subheadline)
-            Spacer(minLength: 10)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 8)
             Text(value)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
     }
 
     private func linkRow(icon: String, gradient: LinearGradient, title: String, value: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ModernIconBadge(systemName: icon, gradient: gradient, size: 30, cornerRadius: 8)
             Text(title)
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            Spacer(minLength: 10)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 8)
             Text(value)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
             Image(systemName: "arrow.up.right.square")
                 .font(.subheadline)
                 .foregroundColor(.secondary)

@@ -55,7 +55,14 @@ struct DownloadsView: View {
                     .ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 18) {
+                    VStack(spacing: 16) {
+                        LiquidGlassGroup(spacing: 8) {
+                            ModernSearchBar(
+                                text: $searchText,
+                                prompt: "Tìm kiếm file .ipa hoặc Apple ID..."
+                            )
+                        }
+
                         if !service.activeDownloads.isEmpty {
                             activeDownloadsSection
                         }
@@ -91,12 +98,11 @@ struct DownloadsView: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 10)
+                    .padding(.top, 4)
                     .padding(.bottom, 28)
                 }
             }
             .navigationTitle("Tải xuống")
-            .searchable(text: $searchText, prompt: "Tìm kiếm file .ipa hoặc Apple ID...")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !service.downloadedFiles.isEmpty {
@@ -321,6 +327,8 @@ struct DownloadsView: View {
                                 .font(.caption2)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                         }
                         Text(item.accountEmail)
                             .font(.caption2)

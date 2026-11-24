@@ -48,36 +48,17 @@ struct DebugLogView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
 
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(logText.isEmpty ? "(Trống)" : logText)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(14)
-                                    .textSelection(.enabled)
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("LOG_BOTTOM")
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(AppTheme.cardBackground)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.75)
-                            )
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
-                        }
-                        .onAppear {
-                            proxy.scrollTo("LOG_BOTTOM", anchor: .bottom)
-                        }
-                        .onChange(of: logText) { _ in
-                            proxy.scrollTo("LOG_BOTTOM", anchor: .bottom)
-                        }
-                    }
+                    SelectableLogTextView(text: logText.isEmpty ? "(Trống)" : logText)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(AppTheme.cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 0.75)
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
                 }
             }
             .navigationTitle("Debug Log")
@@ -108,6 +89,37 @@ struct DebugLogView: View {
             }
             .sheet(isPresented: $showShare) {
                 LogShareSheet(items: [DebugLogger.logURL])
+            }
+        }
+    }
+}
+
+private struct SelectableLogTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = true
+        tv.backgroundColor = .clear
+        tv.textColor = .label
+        tv.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        tv.textContainerInset = UIEdgeInsets(top: 14, left: 10, bottom: 14, right: 10)
+        tv.autocorrectionType = .no
+        tv.smartQuotesType = .no
+        tv.smartDashesType = .no
+        tv.dataDetectorTypes = []
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        guard uiView.text != text else { return }
+        uiView.text = text
+        DispatchQueue.main.async {
+            let length = (uiView.text as NSString).length
+            if length > 0 {
+                uiView.scrollRangeToVisible(NSRange(location: max(0, length - 1), length: 1))
             }
         }
     }

@@ -110,7 +110,7 @@ enum LocalCACertTrustState: Equatable {
     var title: String {
         switch self {
         case .notInstalled:
-            return "Chưa tải / Chưa cài hồ sơ"
+            return "Chưa cài đặt / Chưa tin cậy"
         case .profileDownloadedNotTrusted:
             return "Đã tải hồ sơ • Chưa bật Tin cậy"
         case .trusted:

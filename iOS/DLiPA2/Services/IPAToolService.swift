@@ -685,7 +685,6 @@ final class IPAToolService: ObservableObject {
                 client.getInstallerCertChainJSON(errPtr)
             }
             let payload = try decoder.decode(InstallerCertChainPayload.self, from: Data(jsonStr.utf8))
-            let hasDownloadedProfile = client.hasServedCACert()
             let isSystemTrusted = Self.evaluateLocalTLSLeafTrust(leafDER: payload.leafDer)
             if isSystemTrusted {
                 self.localCATrustState = .trusted
@@ -693,8 +692,6 @@ final class IPAToolService: ObservableObject {
                     self.isCACertServerRunning = false
                     BackgroundDownloadManager.shared.updateActiveDownloadState(isActive: self.hasActiveDownloads)
                 }
-            } else if hasDownloadedProfile {
-                self.localCATrustState = .profileDownloadedNotTrusted
             } else {
                 self.localCATrustState = .notInstalled
             }

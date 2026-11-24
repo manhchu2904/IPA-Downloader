@@ -127,11 +127,13 @@ struct AppDetailView: View {
                                     color: app.price <= 0 ? .green : .orange,
                                     icon: app.price <= 0 ? "checkmark" : "cart.fill"
                                 )
+                                .fixedSize(horizontal: true, vertical: false)
                                 ModernStatusPill(
                                     text: platform == "ipad" ? "iPad" : "iPhone",
                                     color: .secondary,
                                     icon: platform == "ipad" ? "ipad" : "iphone"
                                 )
+                                .fixedSize(horizontal: true, vertical: false)
                             }
                         }
                         .padding(.top, 2)
@@ -148,6 +150,8 @@ struct AppDetailView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.down.circle.fill")
                                 Text("Tải phiên bản mới nhất (v\(app.version))")
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                         }
                         .buttonStyle(ModernPrimaryButtonStyle())
@@ -375,18 +379,23 @@ struct AppDetailView: View {
                         Text("v\(displayVer)")
                             .font(.subheadline)
                             .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     } else if loadingVersionId == vid {
-                        Text("Đang lấy số v...")
+                        Text("Đang lấy phiên bản...")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
                     } else {
                         Text("Version ID: \(vid)")
                             .font(.subheadline)
                             .fontWeight(.medium)
+                            .lineLimit(1)
                     }
 
                     if isLatest {
                         ModernStatusPill(text: "Mới nhất", color: .accentColor, icon: "sparkles")
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
 
